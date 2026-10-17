@@ -1,0 +1,28 @@
+name: numerics
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: MAC reference tests
+        run: node --experimental-strip-types --test verify/*.test.mjs
+      - name: Native host path
+        run: g++ -O2 -std=c++17 -DKARMAN_CPU -x c++ -o karman3d kernels/karman3d.cu && ./karman3d
+
+  # Device execution is not simulated. This job stays skipped until a CUDA
+  # runner is explicitly enabled with the repository variable CUDA_RUNNER=true.
+  cuda:
+    if: ${{ vars.CUDA_RUNNER == 'true' }}
+    runs-on: [self-hosted, cuda, sm_86]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run on the attached GPU
+        run: nvcc -O3 -arch=sm_86 -o karman3d kernels/karman3d.cu && ./karman3d

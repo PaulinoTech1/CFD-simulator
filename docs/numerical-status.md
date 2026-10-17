@@ -1,12 +1,27 @@
 # Numerical status
 
-Baseline commit before this work: `aac72f47fddcd381d941dddcd600796b8bf00633`.
+## Phase 1 repair
+
+The defects below were present at `0ba2500` and are fixed in the TypeScript MAC reference. The audit and the measured orders are in [docs/audit/current-state.md](audit/current-state.md) and [docs/audit/phase1-report.md](audit/phase1-report.md).
+
+- Scalar reconstruction follows the face normal. A Courant-1 upwind shift matches the translated field to `1e-8` on x, y, and z.
+- A scalar value of 0 is a real boundary state.
+- A failed substep rolls back the fields, the clock, and the step counter. The report's substep count is the number actually committed.
+- A closed inlet, and an outlet clamp that breaks mass balance, refuse the step instead of reporting a converged pressure solve.
+- Case and restart documents are checked before the solver allocates.
+
+The native file `kernels/karman3d.cu` was not brought up to this scheme. The browser picture is still the collocated preview. Taylor–Green remains near first order; that tolerance was not loosened.
+
+## Earlier baseline
+
+Baseline commit before the MAC reference: `aac72f47fddcd381d941dddcd600796b8bf00633`.
+The MAC reference itself landed in `0ba2500`.
 
 This environment has gcc 12.2.0 and Node 22. It does not have `nvcc` or a GPU. Device execution and any timing on an RTX 3090 Ti are unverified.
 
 The browser picture is still the collocated CPU preview in `src/cfd/solver3d.ts`. It is not the verified scheme.
 
-## Confirmed on that baseline
+### Confirmed on the collocated preview
 
 | # | Finding | Status |
 | --- | --- | --- |
@@ -21,9 +36,9 @@ The browser picture is still the collocated CPU preview in `src/cfd/solver3d.ts`
 | 9 | The outlet branch assumed an x-facing outlet | Confirmed. |
 | 10 | Browser and CUDA did not share temperature or the pressure drive | Confirmed. CUDA had no temperature field. |
 | 11 | Nonfinite velocity was replaced with zero | Confirmed in `measure`. |
-| 12 | The CUDA source was a second copy inside a TypeScript string | Confirmed. `kernels/karman3d.cu` is now the file the UI imports. |
+| 12 | The CUDA source was a second copy inside a TypeScript string | Confirmed. `kernels/karman3d.cu` is the file the UI imports. |
 
-## Scheme now checked
+### Scheme checked at `0ba2500`
 
 Incompressible constant-density Newtonian flow. Stored pressure is kinematic, `φ = p/ρ`.
 
@@ -31,15 +46,15 @@ Staggered MAC grid. The pressure matrix is the positive operator `−div(grad)` 
 
 Momentum diffusion is explicit and subcycled at the viscous stability limit. `ν` is never clipped. Transport for the verified path is flux-form: first-order upwind, or limited linear reconstruction with Heun (MUSCL-RK2). On the Taylor–Green pair below the observed rate is about 1.1, not 2. Vorticity confinement is not part of this solver.
 
-## Commands
+### Commands
 
 ```text
-node --experimental-strip-types --test verify/numerics.test.mjs
+node --experimental-strip-types --test verify/*.test.mjs
 g++ -O2 -std=c++17 -DKARMAN_CPU -x c++ -o karman3d kernels/karman3d.cu
 ./karman3d
 ```
 
-## Results from this environment
+### Results recorded at `0ba2500`
 
 JavaScript reference, 13 tests, all passed:
 
@@ -53,7 +68,7 @@ JavaScript reference, 13 tests, all passed:
 - Periodic dye mass is conserved to `1e-10` by the upwind flux. A uniform stream stays uniform under MUSCL-RK2.
 - Taylor–Green, `ν = 0.01`, `t = 0.5`, CFL `0.2`: relative velocity error `0.028` on `16²` and `0.013` on `32²`.
 
-Native host path:
+Native host path at that commit:
 
 ```text
 decay  err 1.110e-16  PASS

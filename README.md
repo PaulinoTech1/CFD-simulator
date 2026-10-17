@@ -7,7 +7,7 @@ The picture in the browser is still a collocated CPU preview. It does not run on
 ## Checks
 
 ```text
-node --experimental-strip-types --test verify/numerics.test.mjs
+node --experimental-strip-types --test verify/*.test.mjs
 g++ -O2 -std=c++17 -DKARMAN_CPU -x c++ -o karman3d kernels/karman3d.cu
 ./karman3d
 ```

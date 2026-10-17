@@ -1,9 +1,11 @@
 import {
   type BoundaryName,
   type CaseSpec,
+  CaseError,
   type FaceBoundary,
   caseFromJson,
   caseToJson,
+  validateCase,
 } from "./case.ts";
 import { dissipationDensity, type StrainSample } from "./diagnostics.ts";
 
@@ -14,7 +16,13 @@ export type BoundaryFlux = Record<BoundaryName, number>;
 export type StepReport = {
   status: StepStatus;
   time: number;
+  /** Stable substep size. Zero when the call is rejected before a substep. */
   dt: number;
+  /** Interval the caller asked to advance. */
+  attempted: number;
+  /** Interval actually committed. Zero when the call rolls back. */
+  accepted: number;
+  /** Substeps still present in the state. Zero after a rollback. */
   substeps: number;
   kineticEnergy: number;
   divL2: number;
@@ -55,6 +63,12 @@ export class MacSolver {
   inletDye = 1;
   time = 0;
   steps = 0;
+  /**
+   * Verification hook. When set to a substep index, that substep fails before
+   * it updates the fields and the whole requested advance rolls back.
+   * Not a physical model.
+   */
+  failAtSubstep: number | null = null;
   last: StepReport;
 
   private readonly nuX: number;
@@ -92,9 +106,14 @@ export class MacSolver {
   private freeW: Uint8Array;
   private components: Component[] = [];
   private unknown: number[] = [];
+  private time0 = 0;
+  private steps0 = 0;
+  private readonly heldU: number[] = [];
+  private readonly heldV: number[] = [];
+  private readonly heldW: number[] = [];
 
   constructor(spec: CaseSpec, solid?: Uint8Array) {
-    this.spec = spec;
+    this.spec = validateCase(spec);
     const { nx, ny, nz } = spec;
     this.dx = spec.lx / nx;
     this.dy = spec.ly / ny;
@@ -188,11 +207,11 @@ export class MacSolver {
 
   step(dtRequested: number): StepReport {
     if (!(dtRequested > 0) || !Number.isFinite(dtRequested)) {
-      this.last = this.blank("rejected", 0, 0, "timestep must be a positive finite number");
+      this.last = this.report("rejected", 0, dtRequested, 0, 0, 0, 0, false, "timestep must be a positive finite number");
       return this.last;
     }
     if (!this.fieldsFinite()) {
-      this.last = this.blank("nonfinite", 0, 0, "refusing to advance a nonfinite field");
+      this.last = this.report("nonfinite", 0, dtRequested, 0, 0, 0, 0, false, "refusing to advance a nonfinite field");
       return this.last;
     }
     this.save();
@@ -200,13 +219,30 @@ export class MacSolver {
     const limit = this.stableDt();
     const dt = Math.min(dtRequested, limit);
     if (!(dt > 0) || !Number.isFinite(dt)) {
-      this.last = this.blank("rejected", 0, 0, "stable timestep is not positive");
+      this.restore();
+      this.last = this.report("rejected", 0, dtRequested, 0, 0, 0, 0, false, "stable timestep is not positive");
       return this.last;
     }
     const substeps = Math.max(1, Math.ceil(dtRequested / dt - 1e-12));
     let pressureIterations = 0;
     let pressureResidual = 0;
+    let accepted = 0;
     for (let s = 0; s < substeps; s++) {
+      if (this.failAtSubstep === s) {
+        this.restore();
+        this.last = this.report(
+          "rejected",
+          0,
+          dtRequested,
+          0,
+          0,
+          pressureIterations,
+          pressureResidual,
+          false,
+          `injected failure before substep ${s}; rolled back ${s} completed substep(s)`,
+        );
+        return this.last;
+      }
       const h = s === substeps - 1 ? dtRequested - dt * (substeps - 1) : dt;
       const used = Math.min(h, dt);
       this.addForces(used);
@@ -216,25 +252,80 @@ export class MacSolver {
       pressureIterations += projected.iterations;
       pressureResidual = projected.residual;
       this.applyVelocityBC();
-      this.clampBackflow();
+      const clamped = this.holdBackflow();
       if (!projected.converged || !this.fieldsFinite()) {
         this.restore();
         const status: StepStatus = !this.fieldsFinite() ? "nonfinite" : "pressure-not-converged";
-        this.last = this.measure(status, 0, 0, pressureIterations, pressureResidual, projected.converged, projected.detail);
-        this.last.time = this.time;
+        this.last = this.report(status, 0, dtRequested, 0, 0, pressureIterations, pressureResidual, false, projected.detail);
+        return this.last;
+      }
+      if (clamped > 0) {
+        const defect = this.volumeFlux();
+        if (Math.abs(defect) > this.fluxTolerance()) {
+          this.restore();
+          this.last = this.report(
+            "rejected",
+            0,
+            dtRequested,
+            0,
+            0,
+            pressureIterations,
+            pressureResidual,
+            true,
+            `outlet clamp would leave volume flux ${defect.toExponential(2)}; step refused`,
+          );
+          return this.last;
+        }
+        const again = this.project(used);
+        pressureIterations += again.iterations;
+        pressureResidual = again.residual;
+        this.releaseHeld();
+        this.applyVelocityBC();
+        if (!again.converged || !this.fieldsFinite()) {
+          this.restore();
+          const status: StepStatus = !this.fieldsFinite() ? "nonfinite" : "pressure-not-converged";
+          this.last = this.report(status, 0, dtRequested, 0, 0, pressureIterations, pressureResidual, false, again.detail);
+          return this.last;
+        }
+      }
+      const defect = this.volumeFlux();
+      const div = this.divergenceNorms().linf;
+      if (Math.abs(defect) > this.fluxTolerance() || div > 1e-4) {
+        this.restore();
+        this.last = this.report(
+          "rejected",
+          0,
+          dtRequested,
+          0,
+          0,
+          pressureIterations,
+          pressureResidual,
+          projected.converged,
+          `projection left divergence ${div.toExponential(2)} and volume flux ${defect.toExponential(2)}`,
+        );
         return this.last;
       }
       this.advanceScalars(used);
       if (!this.fieldsFinite()) {
         this.restore();
-        this.last = this.measure("nonfinite", 0, 0, pressureIterations, pressureResidual, false, "scalar transport became nonfinite");
-        this.last.time = this.time;
+        this.last = this.report(
+          "nonfinite",
+          0,
+          dtRequested,
+          0,
+          0,
+          pressureIterations,
+          pressureResidual,
+          false,
+          "scalar transport became nonfinite",
+        );
         return this.last;
       }
       this.time += used;
       this.steps += 1;
+      accepted += used;
     }
-    this.last = this.measure("ok", this.time, dt, pressureIterations, pressureResidual, true, "accepted");
+    this.last = this.report("ok", dt, dtRequested, accepted, substeps, pressureIterations, pressureResidual, true, "accepted");
     return this.last;
   }
 
@@ -551,27 +642,66 @@ export class MacSolver {
   }
 
   static fromRestart(text: string): MacSolver {
-    const raw = JSON.parse(text) as {
-      case: CaseSpec;
-      time: number;
-      steps: number;
-      u: number[];
-      v: number[];
-      w: number[];
-      phi: number[];
-      temperature: number[];
-      dye: number[];
-      solid: number[];
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text) as unknown;
+    } catch {
+      throw new CaseError("restart JSON is not parseable");
+    }
+    if (!raw || typeof raw !== "object") throw new CaseError("restart must be an object");
+    const doc = raw as {
+      version?: unknown;
+      time?: unknown;
+      steps?: unknown;
+      case?: unknown;
+      u?: unknown;
+      v?: unknown;
+      w?: unknown;
+      phi?: unknown;
+      temperature?: unknown;
+      dye?: unknown;
+      solid?: unknown;
     };
-    const sim = new MacSolver(caseFromJson(JSON.stringify(raw.case)), Uint8Array.from(raw.solid));
-    sim.u.set(raw.u);
-    sim.v.set(raw.v);
-    sim.w.set(raw.w);
-    sim.phi.set(raw.phi);
-    sim.temperature.set(raw.temperature);
-    sim.dye.set(raw.dye);
-    sim.time = raw.time;
-    sim.steps = raw.steps;
+    if (doc.version !== 1) throw new CaseError(`unsupported restart version ${String(doc.version)}`);
+    const spec = validateCase(doc.case);
+    const time = doc.time;
+    const steps = doc.steps;
+    if (typeof time !== "number" || !Number.isFinite(time) || time < 0) throw new CaseError("restart time must be a nonnegative finite number");
+    if (typeof steps !== "number" || !Number.isInteger(steps) || steps < 0) throw new CaseError("restart step counter must be a nonnegative integer");
+    const nC = spec.nx * spec.ny * spec.nz;
+    const nU = (spec.nx + 1) * spec.ny * spec.nz;
+    const nV = spec.nx * (spec.ny + 1) * spec.nz;
+    const nW = spec.nx * spec.ny * (spec.nz + 1);
+    const finiteArray = (value: unknown, length: number, label: string): number[] => {
+      if (!Array.isArray(value) || value.length !== length) {
+        throw new CaseError(`${label} must be an array of length ${length}`);
+      }
+      for (let i = 0; i < value.length; i++) {
+        if (typeof value[i] !== "number" || !Number.isFinite(value[i])) throw new CaseError(`${label}[${i}] must be finite`);
+      }
+      return value as number[];
+    };
+    const u = finiteArray(doc.u, nU, "u");
+    const v = finiteArray(doc.v, nV, "v");
+    const w = finiteArray(doc.w, nW, "w");
+    const phi = finiteArray(doc.phi, nC, "phi");
+    const temperature = finiteArray(doc.temperature, nC, "temperature");
+    const dye = finiteArray(doc.dye, nC, "dye");
+    if (!Array.isArray(doc.solid) || doc.solid.length !== nC) throw new CaseError(`solid must be an array of length ${nC}`);
+    const solid = new Uint8Array(nC);
+    for (let i = 0; i < nC; i++) {
+      if (doc.solid[i] !== 0 && doc.solid[i] !== 1) throw new CaseError(`solid[${i}] must be 0 or 1`);
+      solid[i] = doc.solid[i];
+    }
+    const sim = new MacSolver(spec, solid);
+    sim.u.set(u);
+    sim.v.set(v);
+    sim.w.set(w);
+    sim.phi.set(phi);
+    sim.temperature.set(temperature);
+    sim.dye.set(dye);
+    sim.time = time;
+    sim.steps = steps;
     return sim;
   }
 
@@ -713,33 +843,78 @@ export class MacSolver {
     this.syncPeriodic();
   }
 
-  private clampBackflow(): void {
+  /**
+   * Zero reversed outlet faces and freeze them for a second projection.
+   * Returns how many faces changed. Call `releaseHeld` before the next step
+   * so those faces are free again; `restore` does that itself.
+   */
+  private holdBackflow(): number {
     const { nx, ny, nz, boundaries: b } = this.spec;
-    const clampU = (side: FaceBoundary, i: number) => {
-      if (side.kind !== "outlet" || side.backflow !== "clamp") return;
-      const inward = i === 0 ? 1 : -1;
-      for (let k = 0; k < nz; k++) {
-        for (let j = 0; j < ny; j++) {
-          const id = this.iu(i, j, k);
-          if (this.u[id]! * inward > 0) this.u[id] = 0;
-        }
+    let changed = 0;
+    const take = (
+      side: FaceBoundary,
+      inward: boolean,
+      id: number,
+      vel: Float64Array,
+      free: Uint8Array,
+      held: number[],
+    ) => {
+      if (side.kind !== "outlet" || side.backflow !== "clamp" || !inward) return;
+      if (vel[id] === 0) return;
+      vel[id] = 0;
+      changed += 1;
+      if (free[id] === 1) {
+        free[id] = 0;
+        held.push(id);
       }
     };
-    clampU(b.west, 0);
-    clampU(b.east, nx);
-    if (b.south.kind === "outlet" && b.south.backflow === "clamp") {
-      for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) if (this.v[this.iv(i, 0, k)]! > 0) this.v[this.iv(i, 0, k)] = 0;
+    if (b.west.kind === "outlet" || b.east.kind === "outlet") {
+      for (let k = 0; k < nz; k++) {
+        for (let j = 0; j < ny; j++) {
+          take(b.west, this.u[this.iu(0, j, k)]! > 0, this.iu(0, j, k), this.u, this.freeU, this.heldU);
+          take(b.east, this.u[this.iu(nx, j, k)]! < 0, this.iu(nx, j, k), this.u, this.freeU, this.heldU);
+        }
+      }
     }
-    if (b.north.kind === "outlet" && b.north.backflow === "clamp") {
-      for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) if (this.v[this.iv(i, ny, k)]! < 0) this.v[this.iv(i, ny, k)] = 0;
+    if (b.south.kind === "outlet" || b.north.kind === "outlet") {
+      for (let k = 0; k < nz; k++) {
+        for (let i = 0; i < nx; i++) {
+          take(b.south, this.v[this.iv(i, 0, k)]! > 0, this.iv(i, 0, k), this.v, this.freeV, this.heldV);
+          take(b.north, this.v[this.iv(i, ny, k)]! < 0, this.iv(i, ny, k), this.v, this.freeV, this.heldV);
+        }
+      }
     }
-    if (b.back.kind === "outlet" && b.back.backflow === "clamp") {
-      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (this.w[this.iw(i, j, 0)]! > 0) this.w[this.iw(i, j, 0)] = 0;
+    if (b.back.kind === "outlet" || b.front.kind === "outlet") {
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          take(b.back, this.w[this.iw(i, j, 0)]! > 0, this.iw(i, j, 0), this.w, this.freeW, this.heldW);
+          take(b.front, this.w[this.iw(i, j, nz)]! < 0, this.iw(i, j, nz), this.w, this.freeW, this.heldW);
+        }
+      }
     }
-    if (b.front.kind === "outlet" && b.front.backflow === "clamp") {
-      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (this.w[this.iw(i, j, nz)]! < 0) this.w[this.iw(i, j, nz)] = 0;
-    }
-    this.syncPeriodic();
+    return changed;
+  }
+
+  private releaseHeld(): void {
+    for (const id of this.heldU) this.freeU[id] = 1;
+    for (const id of this.heldV) this.freeV[id] = 1;
+    for (const id of this.heldW) this.freeW[id] = 1;
+    this.heldU.length = 0;
+    this.heldV.length = 0;
+    this.heldW.length = 0;
+  }
+
+  /** Net volume flux through every fluid cell, m³/s. Zero on a discrete divergence-free field. */
+  private volumeFlux(): number {
+    this.writeDivergence(this.div);
+    const vol = this.dx * this.dy * this.dz;
+    let net = 0;
+    for (let c = 0; c < this.nC; c++) if (this.solid[c] !== 1) net += this.div[c]! * vol;
+    return net;
+  }
+
+  private fluxTolerance(): number {
+    return 1e-6 * Math.max(this.spec.lx * this.spec.ly * this.spec.lz, this.dx * this.dy * this.dz);
   }
 
   private syncPeriodic(): void {
@@ -1504,41 +1679,44 @@ export class MacSolver {
     dirichlet: ((side: FaceBoundary) => number | null) | null,
     boundary: FaceBoundary,
   ): number {
+    const { nx, ny, nz } = this.spec;
     const vel = axis === "u" ? this.u[this.iu(i, j, k)]! : axis === "v" ? this.v[this.iv(i, j, k)]! : this.w[this.iw(i, j, k)]!;
-    const sample = (di: number, dj: number, dk: number): number => this.sampleScalar(field, i + di - (axis === "u" ? 1 : 0), j + dj - (axis === "v" ? 1 : 0), k + dk - (axis === "w" ? 1 : 0), inletValue, dirichlet);
-    // Reconstruction is around the donor cell. Boundary faces use the prescribed exterior value.
-    const onBoundary =
-      (axis === "u" && (i === 0 || i === this.spec.nx)) ||
-      (axis === "v" && (j === 0 || j === this.spec.ny)) ||
-      (axis === "w" && (k === 0 || k === this.spec.nz));
+    const face = axis === "u" ? i : axis === "v" ? j : k;
+    const n = axis === "u" ? nx : axis === "v" ? ny : nz;
+    const at = (delta: number): number => {
+      const along = face - 1 + delta;
+      if (axis === "u") return this.sampleScalar(field, along, j, k, inletValue, dirichlet);
+      if (axis === "v") return this.sampleScalar(field, i, along, k, inletValue, dirichlet);
+      return this.sampleScalar(field, i, j, along, inletValue, dirichlet);
+    };
+    const onBoundary = face === 0 || face === n;
     if (onBoundary && boundary.kind !== "periodic") {
-      const exterior = dirichlet ? (dirichlet(boundary) ?? inletValue) : inletValue;
-      const interior = sample(0, 0, 0);
-      // sample() above is shifted; use the interior cell explicitly
-      const ii = axis === "u" ? (i === 0 ? 0 : this.spec.nx - 1) : i;
-      const jj = axis === "v" ? (j === 0 ? 0 : this.spec.ny - 1) : j;
-      const kk = axis === "w" ? (k === 0 ? 0 : this.spec.nz - 1) : k;
-      const inside = this.solid[this.ic(ii, jj, kk)] === 1 ? 0 : field[this.ic(ii, jj, kk)]!;
+      const prescribed = dirichlet ? dirichlet(boundary) : null;
+      const exterior = prescribed === null ? inletValue : prescribed;
+      const interiorIndex = face === 0 ? 0 : n - 1;
+      const ii = axis === "u" ? interiorIndex : i;
+      const jj = axis === "v" ? interiorIndex : j;
+      const kk = axis === "w" ? interiorIndex : k;
+      const id = this.ic(ii, jj, kk);
+      const inside = this.solid[id] === 1 ? 0 : field[id]!;
       const entering =
         (axis === "u" && i === 0 && vel > 0) ||
-        (axis === "u" && i === this.spec.nx && vel < 0) ||
+        (axis === "u" && i === nx && vel < 0) ||
         (axis === "v" && j === 0 && vel > 0) ||
-        (axis === "v" && j === this.spec.ny && vel < 0) ||
+        (axis === "v" && j === ny && vel < 0) ||
         (axis === "w" && k === 0 && vel > 0) ||
-        (axis === "w" && k === this.spec.nz && vel < 0);
-      return vel * (entering ? exterior : inside || interior);
+        (axis === "w" && k === nz && vel < 0);
+      // Zero is a real scalar. Do not replace it with another sample.
+      return vel * (entering ? exterior : inside);
     }
-    const left = order === 2 ? this.reconstruct(sample, -1, 0) : sample(-1, 0, 0);
-    const right = order === 2 ? this.reconstruct(sample, 0, 1) : sample(0, 0, 0);
+    const low = at(0);
+    const high = at(1);
+    if (order < 2) return vel >= 0 ? vel * low : vel * high;
+    const slopeLow = minmod(low - at(-1), high - low);
+    const slopeHigh = minmod(high - low, at(2) - high);
+    const left = low + 0.5 * slopeLow;
+    const right = high - 0.5 * slopeHigh;
     return vel >= 0 ? vel * left : vel * right;
-  }
-
-  private reconstruct(sample: (di: number, dj: number, dk: number) => number, a: number, b: number): number {
-    const c0 = sample(a, 0, 0);
-    const cm = sample(a - 1, 0, 0);
-    const cp = sample(b, 0, 0);
-    const slope = minmod(c0 - cm, cp - c0);
-    return a < 0 ? c0 + 0.5 * slope : c0 - 0.5 * slope;
   }
 
   private sampleScalar(
@@ -1683,15 +1861,20 @@ export class MacSolver {
     this.phi0.set(this.phi);
     this.dye0.set(this.dye);
     this.temp0.set(this.temperature);
+    this.time0 = this.time;
+    this.steps0 = this.steps;
   }
 
   private restore(): void {
+    this.releaseHeld();
     this.u.set(this.u0);
     this.v.set(this.v0);
     this.w.set(this.w0);
     this.phi.set(this.phi0);
     this.dye.set(this.dye0);
     this.temperature.set(this.temp0);
+    this.time = this.time0;
+    this.steps = this.steps0;
   }
 
   private fieldsFinite(): boolean {
@@ -1704,10 +1887,12 @@ export class MacSolver {
     return true;
   }
 
-  private measure(
+  private report(
     status: StepStatus,
-    time: number,
     dt: number,
+    attempted: number,
+    accepted: number,
+    substeps: number,
     pressureIterations: number,
     pressureResidual: number,
     pressureConverged: boolean,
@@ -1723,9 +1908,11 @@ export class MacSolver {
     for (let i = 0; i < this.nW; i++) maxSpeed = Math.max(maxSpeed, Math.abs(this.w[i]!));
     return {
       status,
-      time,
+      time: this.time,
       dt,
-      substeps: 1,
+      attempted,
+      accepted,
+      substeps,
       kineticEnergy: this.kineticEnergy(),
       divL2: norms.l2,
       divLinf: norms.linf,
@@ -1741,7 +1928,8 @@ export class MacSolver {
   }
 
   private blank(status: StepStatus, time: number, dt: number, detail: string): StepReport {
-    return this.measure(status, time, dt, 0, 0, status === "ok", detail);
+    void time;
+    return this.report(status, dt, 0, 0, 0, 0, 0, status === "ok", detail);
   }
 }
 

@@ -466,11 +466,11 @@ export function Bench() {
     <div className="min-h-screen bg-bg text-fg">
       <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-border bg-bg px-4 py-3">
         <div className="min-w-40">
-          <p className="font-mono text-xs tracking-widest text-primary">GA102 · BARE CUDA</p>
+          <p className="font-mono text-xs tracking-widest text-primary">CPU preview · GPU unverified</p>
           <h1 className="text-balance text-xl font-semibold tracking-tight">Karman</h1>
         </div>
         <p className="hidden max-w-xl text-pretty text-sm text-muted md:block">
-          Every case is a 3D volume. The street is a spanwise cylinder. Kernels holds the same method as one CUDA C file for the 3090 Ti.
+          Every case is a 3D volume. The picture is a CPU preview. The checked MAC solver runs headless. The CUDA file is not executing on a GPU here.
         </p>
         <div className="ml-auto flex flex-wrap gap-2">
           <button type="button" className={btn} onClick={() => setRunning((v) => !v)}>
@@ -517,9 +517,9 @@ export function Bench() {
             </p>
           </div>
           <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            <Stat label="St" value={hud.strouhal > 0 ? num(hud.strouhal, 3) : "—"} />
-            <Stat label="Cd" value={num(hud.cd, 2)} />
-            <Stat label="Cl" value={num(hud.cl, 2)} />
+            <Stat label="St (preview)" value={hud.strouhal > 0 ? num(hud.strouhal, 3) : "—"} />
+            <Stat label="Cd (preview)" value={num(hud.cd, 2)} />
+            <Stat label="Cl (preview)" value={num(hud.cl, 2)} />
             <Stat label="ms / step" value={num(hud.stepMs, 1)} />
             <Stat label="grid" value={hud.cells} />
             <Stat label="max |u|" value={num(hud.maxSpeed, 2)} />
