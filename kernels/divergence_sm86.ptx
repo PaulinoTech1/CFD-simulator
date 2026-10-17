@@ -1,0 +1,96 @@
+// divergence_sm86.ptx
+// Hand-written PTX for the divergence of a collocated velocity field.
+//   div = 0.5 * ((u[i+1]-u[i-1]) + (v[j+1]-v[j-1]))
+// Target: sm_86 (RTX 3090 Ti). Assemble with:
+//   ptxas -arch=sm_86 -O3 divergence_sm86.ptx -o divergence_sm86.cubin
+// Launch with a 16x16 block, matching the CUDA side.
+
+.version 8.4
+.target sm_86
+.address_size 64
+
+.visible .entry divergence_sm86(
+    .param .u64 pU,
+    .param .u64 pV,
+    .param .u64 pDiv,
+    .param .u32 nx,
+    .param .u32 ny
+)
+{
+    .reg .pred %p<4>;
+    .reg .b32 %r<32>;
+    .reg .b64 %rd<12>;
+    .reg .f32 %f<12>;
+
+    mov.u32 %r0, %ctaid.x;
+    mov.u32 %r1, %ntid.x;
+    mov.u32 %r2, %tid.x;
+    mad.lo.u32 %r3, %r0, %r1, %r2;
+
+    mov.u32 %r4, %ctaid.y;
+    mov.u32 %r5, %ntid.y;
+    mov.u32 %r6, %tid.y;
+    mad.lo.u32 %r7, %r4, %r5, %r6;
+
+    ld.param.u32 %r8, [nx];
+    ld.param.u32 %r9, [ny];
+
+    setp.ge.u32 %p0, %r3, %r8;
+    setp.ge.or.u32 %p0, %r7, %r9, %p0;
+    @%p0 bra DONE;
+
+    mad.lo.u32 %r10, %r7, %r8, %r3;
+
+    setp.eq.u32 %p1, %r3, 0;
+    add.u32 %r11, %r8, -1;
+    setp.ge.or.u32 %p1, %r3, %r11, %p1;
+    setp.eq.or.u32 %p1, %r7, 0, %p1;
+    add.u32 %r12, %r9, -1;
+    setp.ge.or.u32 %p1, %r7, %r12, %p1;
+    @%p1 bra STORE0;
+
+    ld.param.u64 %rd0, [pU];
+    ld.param.u64 %rd1, [pV];
+    ld.param.u64 %rd2, [pDiv];
+
+    add.u32 %r13, %r10, 1;
+    sub.u32 %r14, %r10, 1;
+    add.u32 %r15, %r10, %r8;
+    sub.u32 %r16, %r10, %r8;
+
+    mul.wide.u32 %rd3, %r13, 4;
+    add.s64 %rd4, %rd0, %rd3;
+    ld.global.cs.f32 %f0, [%rd4];
+
+    mul.wide.u32 %rd3, %r14, 4;
+    add.s64 %rd4, %rd0, %rd3;
+    ld.global.cs.f32 %f1, [%rd4];
+
+    mul.wide.u32 %rd3, %r15, 4;
+    add.s64 %rd4, %rd1, %rd3;
+    ld.global.cs.f32 %f2, [%rd4];
+
+    mul.wide.u32 %rd3, %r16, 4;
+    add.s64 %rd4, %rd1, %rd3;
+    ld.global.cs.f32 %f3, [%rd4];
+
+    sub.f32 %f4, %f0, %f1;
+    sub.f32 %f5, %f2, %f3;
+    add.f32 %f6, %f4, %f5;
+    mul.f32 %f7, %f6, 0f3F000000;
+
+    mul.wide.u32 %rd3, %r10, 4;
+    add.s64 %rd4, %rd2, %rd3;
+    st.global.cs.f32 [%rd4], %f7;
+    bra DONE;
+
+STORE0:
+    ld.param.u64 %rd2, [pDiv];
+    mul.wide.u32 %rd3, %r10, 4;
+    add.s64 %rd4, %rd2, %rd3;
+    mov.f32 %f7, 0f00000000;
+    st.global.cs.f32 [%rd4], %f7;
+
+DONE:
+    ret;
+}
