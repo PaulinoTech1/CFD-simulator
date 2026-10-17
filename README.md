@@ -1,24 +1,27 @@
 # CFD simulator
 
-Live 2D incompressible Navier–Stokes bench (Karman), plus the same method written for an RTX 3090 Ti and a Ryzen 9 5900X.
+3D incompressible Navier–Stokes bench, plus the same method as one bare CUDA C file for an RTX 3090 Ti (GA102, sm_86). The host notes are for a Ryzen 9 5900X.
 
-The interactive field is a collocated Chorin projection: semi-Lagrangian advection, implicit diffusion, and a pressure Poisson solve. On a cylinder in a channel the shedding sits near a Strouhal number of 0.20.
+The live volume is a collocated projection: semi-Lagrangian advection, Jacobi/SOR pressure, dye, a temperature field, and an imposed streamwise pressure gradient. Solids are voxel shapes you can swap in the Suite tab: sphere, cylinder, box, cone, plate, NACA 0012. The mid-span cut of a solid is a plane-stress finite-element section loaded by the fluid pressure.
+
+The browser runs the reference solver on the CPU. It does not launch the GPU.
 
 ## Kernels
 
 | File | Target |
 | --- | --- |
-| `kernels/karman_ga102.cu` | CUDA C, `sm_86`, 16×16 blocks, shared-memory Jacobi |
+| `kernels/karman3d.cu` | The 3D suite. CUDA C, sm_86, no CFD library |
+| `kernels/karman_ga102.cu` | 2D CUDA C, 16×16 blocks, shared-memory Jacobi |
 | `kernels/divergence_sm86.ptx` | Hand-written PTX divergence stencil |
 | `kernels/znver3_ke.s` | AVX2 kinetic-energy reduction for Zen 3 |
 
 ```text
-nvcc -O3 -arch=sm_86 --use_fast_math -c kernels/karman_ga102.cu
-ptxas -arch=sm_86 -O3 kernels/divergence_sm86.ptx -o divergence_sm86.cubin
-clang -c -o znver3_ke.o kernels/znver3_ke.s
+nvcc -O3 -arch=sm_86 --use_fast_math -o karman3d kernels/karman3d.cu
+./karman3d karman  64 32 32 400
+./karman3d airfoil 64 32 32 400 0.2
 ```
 
-The browser build runs the reference solver in `src/cfd/solver.ts`. It does not launch the GPU. The Rig and Kernels panels in the UI show the GA102 launch geometry and these sources.
+Presets: `karman`, `airfoil`, `cavity`, `plume`, `jet`, `kelvin`, `ink`. Arguments are preset, `nx ny nz`, steps, and an optional streamwise pressure gradient.
 
 ## Web bench
 
@@ -27,4 +30,4 @@ npm install
 npm run dev
 ```
 
-Presets: Kármán street, NACA 0012, lid-driven cavity, plane jet, thermal plume, Kelvin–Helmholtz, stirred ink.
+Cases: Kármán street, NACA 0012, lid cavity, thermal plume, round jet, Kelvin–Helmholtz, stirred ink. Orbit the volume, scroll or pinch to zoom, and use Suite to change the solid, the temperatures, and the pressure gradient.

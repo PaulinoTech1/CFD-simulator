@@ -1,25 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Download, Pause, Play, RotateCcw, SkipForward } from "lucide-react";
-import { CPU, GPU, formatBytes, planLaunch } from "@/cfd/device";
+import { CPU, GPU, formatBytes, planVolume } from "@/cfd/device";
 import { KERNELS } from "@/cfd/kernels";
-import { PRESETS, buildScene, presetInfo } from "@/cfd/presets";
-import { LUT_DIVERGE, LUT_INK, LUT_SPEED, lutAt } from "@/cfd/colormap";
-import { createDrawState, drawField, drawSpark, ensureTarget, type FrameTarget } from "@/cfd/render";
-import { FluidSim } from "@/cfd/solver";
-import type { PresetId, SimParams, SimStats, Splat, ToolMode, ViewMode } from "@/cfd/types";
+import { sectionFea, type FeaReport } from "@/cfd/fea";
+import { PRESETS3, buildScene3, preset3Info, type BodyKind, type Preset3, type Splat3 } from "@/cfd/presets3d";
+import { drawCurve, drawVolume, hitVolume, type Camera } from "@/cfd/render3d";
+import { SKILLS, readVolume, solveBlackScholes, solveHeston, type SkillId } from "@/cfd/skills";
+import { Fluid3 } from "@/cfd/solver3d";
+import type { SimParams, SimStats, ViewMode } from "@/cfd/types";
 
-const HEIGHTS = [72, 96, 120, 160] as const;
-
-const HEIGHT_NAME: Record<(typeof HEIGHTS)[number], string> = {
-  72: "Draft",
-  96: "Bench",
-  120: "Fine",
-  160: "5900X",
+const SPANS = [16, 24, 32] as const;
+const SPAN_NAME: Record<(typeof SPANS)[number], string> = {
+  16: "Bench",
+  24: "Fine",
+  32: "Dense",
 };
 
-type Panel = "field" | "rig" | "kernels";
-
-type Hud = SimStats & { stepMs: number; cells: number; hover: string };
+type Panel = "field" | "suite" | "skills" | "rig" | "kernels";
+type Tool = "orbit" | "stir" | "place" | "erase";
+type Hud = SimStats & { stepMs: number; cells: string; hover: string };
 
 const ZERO: Hud = {
   time: 0,
@@ -31,13 +30,13 @@ const ZERO: Hud = {
   fy: 0,
   cd: 0,
   cl: 0,
-  re: 160,
+  re: 180,
   cfl: 0,
   strouhal: 0,
   steps: 0,
   stepMs: 0,
-  cells: 0,
-  hover: "move over the field",
+  cells: "—",
+  hover: "drag to orbit the volume",
 };
 
 function num(n: number, d = 2): string {
@@ -46,45 +45,57 @@ function num(n: number, d = 2): string {
 }
 
 export function Bench() {
-  const [presetId, setPresetId] = useState<PresetId>("karman");
-  const [ny, setNy] = useState(96);
+  const [presetId, setPresetId] = useState<Preset3>("karman");
+  const [span, setSpan] = useState<(typeof SPANS)[number]>(16);
   const [running, setRunning] = useState(true);
   const [view, setView] = useState<ViewMode>("dye");
-  const [tool, setTool] = useState<ToolMode>("stir");
-  const [vectors, setVectors] = useState(false);
+  const [tool, setTool] = useState<Tool>("orbit");
   const [particles, setParticles] = useState(true);
   const [panel, setPanel] = useState<Panel>("field");
   const [kernelId, setKernelId] = useState(KERNELS[0]!.id);
   const [copied, setCopied] = useState(false);
-  const [re, setRe] = useState(160);
-  const [uIn, setUIn] = useState(42);
-  const [vorticity, setVorticity] = useState(0.22);
+  const [re, setRe] = useState(180);
+  const [uIn, setUIn] = useState(1);
+  const [vorticity, setVorticity] = useState(0.16);
   const [buoyancy, setBuoyancy] = useState(0);
-  const [iterations, setIterations] = useState(16);
-  const [driven, setDriven] = useState(true);
+  const [iterations, setIterations] = useState(8);
+  const [solid, setSolid] = useState<BodyKind>("sphere");
+  const [solidSize, setSolidSize] = useState(2.4);
+  const [gradP, setGradP] = useState(0);
+  const [tIn, setTIn] = useState(20);
+  const [tWall, setTWall] = useState(20);
+  const [tAmb, setTAmb] = useState(20);
+  const [kappa, setKappa] = useState(0.08);
+  const [young, setYoung] = useState(2);
+  const [fea, setFea] = useState<FeaReport | null>(null);
+  const [drop, setDrop] = useState(0);
+  const [skillId, setSkillId] = useState<SkillId>("topology");
+  const [sigma, setSigma] = useState(0.2);
+  const [xi, setXi] = useState(0.5);
   const [hud, setHud] = useState<Hud>(ZERO);
-  const [traceName, setTraceName] = useState("Cl");
+  const [reading, setReading] = useState("");
+  const [dist, setDist] = useState(43);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sparkRef = useRef<HTMLCanvasElement>(null);
-  const legendRef = useRef<HTMLCanvasElement>(null);
-  const simRef = useRef<FluidSim | null>(null);
-  const targetRef = useRef<FrameTarget | null>(null);
-  const drawState = useRef(createDrawState());
-  const splats = useRef<Splat[]>([]);
+  const chartRef = useRef<HTMLCanvasElement>(null);
+  const feaRef = useRef<HTMLCanvasElement>(null);
+  const simRef = useRef<Fluid3 | null>(null);
+  const splats = useRef<Splat3[]>([]);
   const down = useRef(false);
-  const lastCell = useRef({ x: 0, y: 0 });
-  const hoverCell = useRef<{ x: number; y: number } | null>(null);
+  const lastPtr = useRef({ x: 0, y: 0, w: 1, h: 1 });
   const stepOnce = useRef(false);
-  const decayRef = useRef(0);
+  const decayRef = useRef(0.12);
   const spark = useRef(new Float32Array(160));
   const sparkN = useRef(0);
   const sparkAt = useRef(0);
   const resetRef = useRef<() => void>(() => {});
+  const cam = useRef<Camera>({ yaw: 0.7, pitch: 0.38, dist: 48 });
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef(0);
 
   const live = useRef({
     view,
-    vectors,
     particles,
     running,
     tool,
@@ -93,34 +104,63 @@ export function Bench() {
     vorticity,
     buoyancy,
     iterations,
+    gradP,
+    tIn,
+    tWall,
+    tAmb,
+    kappa,
+    young,
+    panel,
+    solid,
+    solidSize,
+    skillId,
+    presetId,
   });
-  live.current = { view, vectors, particles, running, tool, re, uIn, vorticity, buoyancy, iterations };
+  live.current = {
+    view,
+    particles,
+    running,
+    tool,
+    re,
+    uIn,
+    vorticity,
+    buoyancy,
+    iterations,
+    gradP,
+    tIn,
+    tWall,
+    tAmb,
+    kappa,
+    young,
+    panel,
+    solid,
+    solidSize,
+    skillId,
+    presetId,
+  };
 
-  const info = presetInfo(presetId);
+  const info = preset3Info(presetId);
   const kernel = KERNELS.find((k) => k.id === kernelId) ?? KERNELS[0]!;
+  const skill = SKILLS.find((s) => s.id === skillId) ?? SKILLS[0]!;
 
-  function loadPreset(id: PresetId, height: number) {
-    const scene = buildScene(id, height);
-    const next = presetInfo(id);
+  function applyScene(id: Preset3, nextSpan: number) {
+    const scene = buildScene3(id, nextSpan);
     setPresetId(id);
-    setNy(scene.ny);
     setView(scene.view);
-    setVectors(scene.vectors);
     setRe(scene.re);
     setUIn(scene.uIn);
     setVorticity(scene.vorticity);
     setBuoyancy(scene.buoyancy);
-    setDriven(scene.driven);
-    setTraceName(scene.hasBody ? "Cl" : "ω");
     decayRef.current = scene.dyeDecay;
-    return { scene, blurb: next.blurb };
+    cam.current.dist = scene.nx * 1.35;
+    setDist(scene.nx * 1.35);
+    return scene;
   }
 
   resetRef.current = () => {
-    const scene = buildScene(presetId, ny);
+    const scene = buildScene3(presetId, span);
     decayRef.current = scene.dyeDecay;
     simRef.current?.load(scene);
-    drawState.current = createDrawState();
     sparkN.current = 0;
     sparkAt.current = 0;
   };
@@ -128,9 +168,11 @@ export function Bench() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const scene = buildScene(presetId, ny);
+    const scene = buildScene3(presetId, span);
     decayRef.current = scene.dyeDecay;
-    const sim = new FluidSim();
+    cam.current.dist = scene.nx * 1.35;
+    setDist(scene.nx * 1.35);
+    const sim = new Fluid3();
     const params = (): SimParams => ({
       re: live.current.re,
       uIn: live.current.uIn,
@@ -138,19 +180,22 @@ export function Bench() {
       buoyancy: live.current.buoyancy,
       iterations: live.current.iterations,
       dyeDecay: decayRef.current,
+      gradP: live.current.gradP,
+      tIn: live.current.tIn,
+      tWall: live.current.tWall,
+      tAmb: live.current.tAmb,
+      kappa: live.current.kappa,
     });
     sim.load(scene);
     let lastSt: SimStats | null = null;
     const warmStart = performance.now();
     let warmed = 0;
-    while (warmed < 1.1 && performance.now() - warmStart < 450) {
-      const h = sim.cflDt(0.8);
+    while (warmed < 1.2 && performance.now() - warmStart < 450) {
+      const h = sim.cflDt(0.7);
       lastSt = sim.step(h, params(), []);
       warmed += lastSt.dt;
     }
-    sim.snapshotParticles();
     simRef.current = sim;
-    targetRef.current = null;
     sparkN.current = 0;
     sparkAt.current = 0;
 
@@ -163,20 +208,15 @@ export function Bench() {
         canvas.width = w;
         canvas.height = h;
       }
-      const spark = sparkRef.current;
-      if (spark) {
-        const sr = spark.getBoundingClientRect();
-        const sw = Math.max(2, Math.round(sr.width * dpr));
-        const sh = Math.max(2, Math.round(sr.height * dpr));
-        if (spark.width !== sw || spark.height !== sh) {
-          spark.width = sw;
-          spark.height = sh;
-        }
+      const sparkCanvas = sparkRef.current;
+      if (sparkCanvas) {
+        const sr = sparkCanvas.getBoundingClientRect();
+        sparkCanvas.width = Math.max(2, Math.round(sr.width * dpr));
+        sparkCanvas.height = Math.max(2, Math.round(sr.height * dpr));
       }
     };
     resize();
     const ro = new ResizeObserver(resize);
-
     let raf = 0;
     let last = performance.now();
     let acc = 0;
@@ -186,17 +226,15 @@ export function Bench() {
     const frame = (now: number) => {
       const wall = Math.min(0.05, (now - last) / 1000);
       last = now;
-      const want = live.current.running ? wall : 0;
-      acc += want;
+      acc += live.current.running ? wall : 0;
       if (stepOnce.current) {
-        acc = Math.max(acc, sim.cflDt(0.8));
+        acc = Math.max(acc, sim.cflDt(0.7));
         stepOnce.current = false;
       }
       let guard = 0;
       const tStep = performance.now();
-      sim.snapshotParticles();
-      while (acc > 1e-4 && guard < 3) {
-        const h = Math.min(sim.cflDt(0.8), acc);
+      while (acc > 1e-4 && guard < 2) {
+        const h = Math.min(sim.cflDt(0.7), acc);
         const st = sim.step(h, params(), splats.current);
         lastSt = st;
         splats.current = [];
@@ -207,53 +245,55 @@ export function Bench() {
         sparkAt.current = (sparkAt.current + 1) % spark.current.length;
         if (sparkN.current < spark.current.length) sparkN.current += 1;
       }
-      if (guard === 3) acc = 0;
+      if (guard === 2) acc = 0;
       if (guard > 0) stepMs = (performance.now() - tStep) / guard;
-
-      targetRef.current = ensureTarget(sim.nx, sim.ny, targetRef.current);
-      drawField(
-        canvas,
-        sim,
-        targetRef.current,
-        live.current.view,
-        live.current.vectors,
-        live.current.particles,
-        drawState.current,
-      );
+      drawVolume(canvas, sim, live.current.view, cam.current, live.current.particles);
       const sparkCanvas = sparkRef.current;
-      if (sparkCanvas && sparkCanvas.width > 0) {
-        drawSpark(sparkCanvas, spark.current, sparkN.current, sparkAt.current);
-      }
-
-      if (now - hudAt > 180 && lastSt) {
+      if (sparkCanvas) paintSpark(sparkCanvas, spark.current, sparkN.current, sparkAt.current);
+      if (now - hudAt > 200 && lastSt) {
         hudAt = now;
-        const hov = hoverCell.current;
-        let hover = "move over the field";
-        if (hov) {
-          const i = Math.max(0, Math.min(sim.nx - 1, hov.x | 0));
-          const j = Math.max(0, Math.min(sim.ny - 1, hov.y | 0));
-          const id = i + j * sim.nx;
-          hover = `i ${i}  j ${j}   u ${num(sim.u[id] ?? 0, 1)}   v ${num(sim.v[id] ?? 0, 1)}   ω ${num(sim.omega[id] ?? 0, 2)}`;
+        if (live.current.panel === "suite") {
+          setDrop(sim.pressureDrop());
+          setFea(sectionFea(sim, live.current.young, 0.3));
         }
+        if (live.current.skillId !== "blackscholes" && live.current.skillId !== "heston") {
+          setReading(readVolume(sim, { re: live.current.re, preset: live.current.presetId }, live.current.skillId).note);
+        }
+        const toolName =
+          live.current.tool === "orbit"
+            ? "drag to orbit"
+            : live.current.tool === "place"
+              ? "click to place the solid"
+              : live.current.tool === "erase"
+                ? "drag to erase solid"
+                : "drag to stir the mid-span plane";
         setHud({
           ...lastSt,
           stepMs,
-          cells: sim.nx * sim.ny,
-          hover,
+          cells: `${sim.nx}×${sim.ny}×${sim.nz}`,
+          hover: toolName,
           re: live.current.re,
         });
       }
       raf = requestAnimationFrame(frame);
     };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 1.1 : 0.9;
+      const next = Math.min(sim.nx * 3.2, Math.max(sim.nx * 0.22, cam.current.dist * factor));
+      cam.current.dist = next;
+      setDist(next);
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
     raf = requestAnimationFrame(frame);
     ro.observe(canvas);
-
     return () => {
       cancelAnimationFrame(raf);
+      canvas.removeEventListener("wheel", onWheel);
       ro.disconnect();
       if (simRef.current === sim) simRef.current = null;
     };
-  }, [presetId, ny]);
+  }, [presetId, span]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -262,76 +302,138 @@ export function Bench() {
       if (e.code === "Space") {
         e.preventDefault();
         setRunning((v) => !v);
-      } else if (e.key === "r" || e.key === "R") {
-        resetRef.current();
-      } else if (e.key === ".") {
-        stepOnce.current = true;
-      }
+      } else if (e.key === "r" || e.key === "R") resetRef.current();
+      else if (e.key === ".") stepOnce.current = true;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffect(() => {
-    const canvas = legendRef.current;
+    const canvas = chartRef.current;
     if (!canvas) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(2, Math.round(rect.width * dpr));
+    canvas.height = Math.max(2, Math.round(rect.height * dpr));
+    if (skillId === "blackscholes") {
+      const solved = solveBlackScholes(sigma);
+      drawCurve(canvas, solved.curveN, solved.curveA);
+      setReading(
+        `Grid call ${solved.numerical.toFixed(2)} against closed form ${solved.analytic.toFixed(2)}. Error ${solved.error.toFixed(2)}. Same parabolic step as the dye.`,
+      );
+    } else if (skillId === "heston") {
+      const solved = solveHeston(xi);
+      drawCurve(canvas, solved.variance, null);
+      setReading(
+        `Heston call ${solved.heston.toFixed(2)}, Black–Scholes at √θ ${solved.blackScholes.toFixed(2)}, gap ${solved.gap.toFixed(2)}. ξ is volatility of volatility.`,
+      );
+    }
+  }, [skillId, sigma, xi, panel]);
+
+  useEffect(() => {
+    const canvas = feaRef.current;
+    const sim = simRef.current;
+    if (!canvas || panel !== "suite") return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(2, Math.round(rect.width * dpr));
+    canvas.height = Math.max(2, Math.round(rect.height * dpr));
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const lut = view === "speed" ? LUT_SPEED : view === "dye" ? LUT_INK : LUT_DIVERGE;
-    const ink = { r: 0, g: 0, b: 0 };
-    canvas.width = 128;
-    canvas.height = 12;
-    for (let i = 0; i < 128; i++) {
-      lutAt(lut, i / 127, ink);
-      ctx.fillStyle = `rgb(${ink.r}, ${ink.g}, ${ink.b})`;
-      ctx.fillRect(i, 0, 1, 12);
+    ctx.fillStyle = "#101412";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!sim || !fea || fea.outline.length === 0) return;
+    ctx.fillStyle = "#e39b2b";
+    for (const q of fea.outline) {
+      const x = (q.x / sim.nx) * canvas.width;
+      const y = canvas.height - (q.y / sim.ny) * canvas.height;
+      ctx.fillRect(x, y, 3, 3);
     }
-  }, [view]);
+  }, [fea, panel]);
 
-  function cellOf(e: React.PointerEvent<HTMLCanvasElement>) {
-    const sim = simRef.current;
+  function pointer(e: React.PointerEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
-    const nx = sim?.nx ?? 2;
-    const nyG = sim?.ny ?? 2;
-    const x = ((e.clientX - rect.left) / Math.max(rect.width, 1)) * nx;
-    const y = (1 - (e.clientY - rect.top) / Math.max(rect.height, 1)) * nyG;
-    return { x, y };
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width, h: rect.height };
   }
 
-  function interact(e: React.PointerEvent<HTMLCanvasElement>) {
-    const sim = simRef.current;
-    if (!sim || !down.current) return;
-    const c = cellOf(e);
-    const mode = live.current.tool;
-    if (mode === "stir") {
-      const prev = lastCell.current;
-      splats.current.push({
-        x: c.x,
-        y: c.y,
-        du: (c.x - prev.x) * 2.4,
-        dv: (c.y - prev.y) * 2.4,
-        dye: 0.65,
-        radius: Math.max(3, sim.ny * 0.05),
-      });
-      lastCell.current = c;
-    } else if (mode === "wall" || mode === "erase") {
-      sim.paint(c.x | 0, c.y | 0, mode === "wall", Math.max(2, (sim.ny * 0.028) | 0));
-    }
+  function setZoom(next: number) {
+    const nx = simRef.current?.nx ?? span * 2;
+    const clamped = Math.min(nx * 3.2, Math.max(nx * 0.22, next));
+    cam.current.dist = clamped;
+    setDist(clamped);
+  }
+
+  function pinchDistance(): number {
+    const pts = [...pointers.current.values()];
+    if (pts.length < 2) return 0;
+    return Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size >= 2) {
+      pinch.current = pinchDistance();
+      down.current = false;
+      return;
+    }
     down.current = true;
-    lastCell.current = cellOf(e);
-    interact(e);
+    const p = pointer(e);
+    lastPtr.current = p;
+    if (live.current.tool === "place" || live.current.tool === "erase") sculpt(p);
+    else if (live.current.tool === "stir") stir(p, p);
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    hoverCell.current = cellOf(e);
-    if (down.current) interact(e);
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size >= 2) {
+      const d = pinchDistance();
+      if (pinch.current > 8 && d > 8) {
+        setZoom(cam.current.dist * (pinch.current / d));
+        pinch.current = d;
+      }
+      return;
+    }
+    if (!down.current) return;
+    const p = pointer(e);
+    if (live.current.tool === "orbit") {
+      cam.current.yaw += (p.x - lastPtr.current.x) * 0.01;
+      cam.current.pitch = Math.max(-1.1, Math.min(1.1, cam.current.pitch + (p.y - lastPtr.current.y) * 0.008));
+    } else if (live.current.tool === "erase") sculpt(p);
+    else if (live.current.tool === "stir") stir(lastPtr.current, p);
+    lastPtr.current = p;
+  }
+
+  function sculpt(p: { x: number; y: number; w: number; h: number }) {
+    const sim = simRef.current;
+    if (!sim) return;
+    const hit = hitVolume(sim, cam.current, p.x, p.y, p.w, p.h);
+    if (!hit) return;
+    if (live.current.tool === "erase") sim.eraseBody(hit.x, hit.y, hit.z, live.current.solidSize);
+    else sim.reshape(live.current.solid, live.current.solidSize, hit);
+  }
+
+  function stir(prev: { x: number; y: number; w: number; h: number }, next: { x: number; y: number; w: number; h: number }) {
+    const sim = simRef.current;
+    if (!sim) return;
+    const hit = hitVolume(sim, cam.current, next.x, next.y, next.w, next.h);
+    if (!hit) return;
+    const scale = sim.nx / next.w;
+    splats.current.push({
+      x: hit.x,
+      y: hit.y,
+      z: hit.z,
+      du: (next.x - prev.x) * scale * 0.35,
+      dv: -(next.y - prev.y) * scale * 0.35,
+      dw: 0,
+      dye: 0.7,
+      radius: Math.max(2, sim.ny * 0.12),
+    });
   }
 
   function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
+    pointers.current.delete(e.pointerId);
     down.current = false;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   }
@@ -356,30 +458,26 @@ export function Bench() {
     URL.revokeObjectURL(url);
   }
 
-  const plan = planLaunch(Math.round(ny * info.aspect), ny);
+  const plan = planVolume(span * 2, span, span);
+  const priced = skillId === "blackscholes" || skillId === "heston";
+  const fluidSkill = !priced && simRef.current ? readVolume(simRef.current, { re, preset: presetId }, skillId) : null;
 
   return (
     <div className="min-h-screen bg-bg text-fg">
       <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-border bg-bg px-4 py-3">
         <div className="min-w-40">
-          <p className="font-mono text-xs tracking-widest text-primary">GA102 · SM 8.6</p>
+          <p className="font-mono text-xs tracking-widest text-primary">GA102 · BARE CUDA</p>
           <h1 className="text-balance text-xl font-semibold tracking-tight">Karman</h1>
         </div>
-        <p className="hidden max-w-md text-pretty text-sm text-muted md:block">
-          2D incompressible Navier–Stokes. This view is the reference solve. The CUDA and PTX are the same method for the 3090 Ti.
+        <p className="hidden max-w-xl text-pretty text-sm text-muted md:block">
+          Every case is a 3D volume. The street is a spanwise cylinder. Kernels holds the same method as one CUDA C file for the 3090 Ti.
         </p>
         <div className="ml-auto flex flex-wrap gap-2">
           <button type="button" className={btn} onClick={() => setRunning((v) => !v)}>
             {running ? <Pause className="size-4" /> : <Play className="size-4" />}
             {running ? "Pause" : "Run"}
           </button>
-          <button
-            type="button"
-            className={btn}
-            onClick={() => {
-              stepOnce.current = true;
-            }}
-          >
+          <button type="button" className={btn} onClick={() => { stepOnce.current = true; }}>
             <SkipForward className="size-4" />
             Step
           </button>
@@ -395,37 +493,36 @@ export function Bench() {
           <div className="relative overflow-hidden rounded-lg border border-border bg-surface">
             <canvas
               ref={canvasRef}
-              className="block w-full touch-none bg-bg"
-              style={{ aspectRatio: `${info.aspect} / 1` }}
+              className="block aspect-[4/3] w-full touch-none bg-bg"
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerCancel={onPointerUp}
             />
+            <div className="absolute top-3 right-3 flex flex-col gap-2">
+              <button type="button" className={zoomBtn} aria-label="Zoom in" onClick={() => setZoom(dist * 0.8)}>
+                +
+              </button>
+              <button type="button" className={zoomBtn} aria-label="Zoom out" onClick={() => setZoom(dist * 1.25)}>
+                −
+              </button>
+            </div>
             <div className="pointer-events-none absolute top-3 left-3 font-mono text-xs leading-5 text-fg">
               <p className="rounded-sm bg-bg/80 px-2 py-1">
-                Re {num(hud.re, 0)} · CFL {num(hud.cfl, 2)} · t {num(hud.time, 2)}s
+                {info.name} · Re {num(hud.re, 0)} · CFL {num(hud.cfl, 2)} · t {num(hud.time, 2)}s
               </p>
             </div>
-            <div className="pointer-events-none absolute right-3 bottom-3 left-3 flex items-end justify-between gap-2">
-              <p className="min-w-0 truncate rounded-sm bg-bg/80 px-2 py-1 font-mono text-xs text-fg">{hud.hover}</p>
-              <div className="shrink-0 rounded-sm bg-bg/80 px-2 py-1">
-                <canvas ref={legendRef} className="h-3 w-32" />
-                <p className="mt-1 flex justify-between font-mono text-xs text-muted">
-                  <span>{view === "vorticity" || view === "pressure" ? "−" : "0"}</span>
-                  <span className="text-fg">{view}</span>
-                  <span>+</span>
-                </p>
-              </div>
-            </div>
+            <p className="pointer-events-none absolute right-3 bottom-3 max-w-[70%] truncate rounded-sm bg-bg/80 px-2 py-1 font-mono text-xs text-fg">
+              {hud.hover}
+            </p>
           </div>
           <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
             <Stat label="St" value={hud.strouhal > 0 ? num(hud.strouhal, 3) : "—"} />
             <Stat label="Cd" value={num(hud.cd, 2)} />
             <Stat label="Cl" value={num(hud.cl, 2)} />
             <Stat label="ms / step" value={num(hud.stepMs, 1)} />
-            <Stat label="cells" value={hud.cells.toLocaleString("en-US")} />
-            <Stat label="max |u|" value={num(hud.maxSpeed, 1)} />
+            <Stat label="grid" value={hud.cells} />
+            <Stat label="max |u|" value={num(hud.maxSpeed, 2)} />
             <Stat label="KE" value={hud.ke > 0 ? hud.ke.toExponential(2) : "—"} />
           </dl>
         </section>
@@ -435,6 +532,8 @@ export function Bench() {
             {(
               [
                 ["field", "Field"],
+                ["suite", "Suite"],
+                ["skills", "Skills"],
                 ["rig", "Rig"],
                 ["kernels", "Kernels"],
               ] as const
@@ -444,7 +543,7 @@ export function Bench() {
                 type="button"
                 role="tab"
                 aria-selected={panel === id}
-                className={`h-11 flex-1 text-sm ${panel === id ? "bg-surface text-primary" : "text-muted"}`}
+                className={`h-11 min-w-0 flex-1 px-1 text-xs ${panel === id ? "bg-surface text-primary" : "text-muted"}`}
                 onClick={() => setPanel(id)}
               >
                 {label}
@@ -456,136 +555,200 @@ export function Bench() {
             <div className="flex flex-col gap-4 p-4">
               <p className="text-pretty text-sm text-muted">{info.blurb}</p>
               <div className="flex flex-wrap gap-2">
-                {PRESETS.map((p) => (
+                {PRESETS3.map((p) => (
                   <button
                     key={p.id}
                     type="button"
                     aria-pressed={p.id === presetId}
                     className={`${chip} ${p.id === presetId ? chipOn : ""}`}
-                    onClick={() => loadPreset(p.id, ny)}
+                    onClick={() => applyScene(p.id, span)}
                   >
                     {p.name}
                   </button>
                 ))}
               </div>
-
               <label className="flex flex-col gap-1 text-xs text-muted">
-                Grid height
-                <select
-                  className={field}
-                  value={ny}
-                  onChange={(e) => {
-                    const height = Number(e.target.value);
-                    setNy(height);
-                  }}
-                >
-                  {HEIGHTS.map((h) => (
+                Span
+                <select className={field} value={span} onChange={(e) => setSpan(Number(e.target.value) as (typeof SPANS)[number])}>
+                  {SPANS.map((h) => (
                     <option key={h} value={h}>
-                      {HEIGHT_NAME[h]} · {h} cells
+                      {SPAN_NAME[h]} · {h * 2}×{h}×{h}
                     </option>
                   ))}
                 </select>
               </label>
-
-              <div>
-                <p className="mb-1 text-xs text-muted">Scalar</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(
-                    [
-                      ["dye", "Dye"],
-                      ["vorticity", "Vorticity"],
-                      ["speed", "Speed"],
-                      ["pressure", "Pressure"],
-                    ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      aria-pressed={view === id}
-                      className={`${chip} ${view === id ? chipOn : ""}`}
-                      onClick={() => setView(id)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["dye", "Dye"],
+                    ["temperature", "Temp"],
+                    ["vorticity", "Vorticity"],
+                    ["speed", "Speed"],
+                    ["pressure", "Pressure"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button key={id} type="button" aria-pressed={view === id} className={`${chip} ${view === id ? chipOn : ""}`} onClick={() => setView(id)}>
+                    {label}
+                  </button>
+                ))}
               </div>
-
-              <div>
-                <p className="mb-1 text-xs text-muted">Pointer</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(
-                    [
-                      ["stir", "Stir"],
-                      ["wall", "Wall"],
-                      ["erase", "Erase"],
-                      ["probe", "Probe"],
-                    ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      aria-pressed={tool === id}
-                      className={`${chip} ${tool === id ? chipOn : ""}`}
-                      onClick={() => setTool(id)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" aria-pressed={tool === "orbit"} className={`${chip} ${tool === "orbit" ? chipOn : ""}`} onClick={() => setTool("orbit")}>
+                  Orbit
+                </button>
+                <button type="button" aria-pressed={tool === "stir"} className={`${chip} ${tool === "stir" ? chipOn : ""}`} onClick={() => setTool("stir")}>
+                  Stir
+                </button>
               </div>
-
-              <Slider label="Reynolds" min={30} max={1200} step={10} value={re} onChange={setRe} digits={0} />
-              {driven ? (
-                <Slider label="Inlet speed" min={0} max={80} step={1} value={uIn} onChange={setUIn} digits={0} />
-              ) : null}
+              <button type="button" aria-pressed={particles} className={`${chip} ${particles ? chipOn : ""}`} onClick={() => setParticles((v) => !v)}>
+                Tracers
+              </button>
               <Slider
-                label="Vorticity confinement"
-                min={0}
-                max={0.8}
-                step={0.02}
-                value={vorticity}
-                onChange={setVorticity}
-                digits={2}
-              />
-              <Slider label="Buoyancy" min={0} max={80} step={1} value={buoyancy} onChange={setBuoyancy} digits={0} />
-              <Slider
-                label="Pressure iterations"
-                min={6}
-                max={40}
+                label="Zoom"
+                min={Math.round(span * 2 * 0.22)}
+                max={Math.round(span * 2 * 3.2)}
                 step={1}
-                value={iterations}
-                onChange={setIterations}
+                value={Math.round(dist)}
                 digits={0}
+                onChange={setZoom}
               />
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  aria-pressed={particles}
-                  className={`${chip} flex-1 ${particles ? chipOn : ""}`}
-                  onClick={() => setParticles((v) => !v)}
-                >
-                  Tracers
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={vectors}
-                  className={`${chip} flex-1 ${vectors ? chipOn : ""}`}
-                  onClick={() => setVectors((v) => !v)}
-                >
-                  Vectors
-                </button>
-              </div>
-
+              <Slider label="Reynolds" min={20} max={800} step={10} value={re} digits={0} onChange={setRe} />
+              <Slider label="Inlet" min={0} max={2} step={0.05} value={uIn} digits={2} onChange={setUIn} />
+              <Slider label="Confinement" min={0} max={0.6} step={0.02} value={vorticity} digits={2} onChange={setVorticity} />
+              <Slider label="Buoyancy" min={0} max={4} step={0.1} value={buoyancy} digits={1} onChange={setBuoyancy} />
+              <Slider label="Pressure iterations" min={4} max={20} step={1} value={iterations} digits={0} onChange={setIterations} />
               <div>
                 <div className="mb-1 flex justify-between text-xs text-muted">
-                  <span>{traceName} trace</span>
-                  <span className="font-mono text-fg">{traceName === "Cl" ? num(hud.cl, 2) : num(hud.maxAbsOmega, 2)}</span>
+                  <span>Cl trace</span>
+                  <span className="font-mono text-fg">{num(hud.cl, 2)}</span>
                 </div>
                 <canvas ref={sparkRef} className="h-12 w-full rounded-md border border-border bg-surface" />
               </div>
               <p className="font-mono text-xs text-muted">Space pause · R reset · . step</p>
+            </div>
+          ) : null}
+
+          {panel === "suite" ? (
+            <div className="flex flex-col gap-4 p-4">
+              <p className="text-pretty text-sm text-muted">
+                Pick a shape and it replaces the solid. Drag the picture to orbit it. Move, then click, to reposition it.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["sphere", "Sphere"],
+                    ["cylinder", "Cylinder"],
+                    ["box", "Box"],
+                    ["cone", "Cone"],
+                    ["plate", "Plate"],
+                    ["airfoil", "Airfoil"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={solid === id}
+                    className={`${chip} ${solid === id ? chipOn : ""}`}
+                    onClick={() => {
+                      setSolid(id);
+                      setTool("orbit");
+                      simRef.current?.reshape(id, solidSize);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button type="button" aria-pressed={tool === "orbit"} className={`${chip} ${tool === "orbit" ? chipOn : ""}`} onClick={() => setTool("orbit")}>
+                  Orbit
+                </button>
+                <button type="button" aria-pressed={tool === "place"} className={`${chip} ${tool === "place" ? chipOn : ""}`} onClick={() => setTool("place")}>
+                  Move
+                </button>
+                <button type="button" aria-pressed={tool === "erase"} className={`${chip} ${tool === "erase" ? chipOn : ""}`} onClick={() => setTool("erase")}>
+                  Erase
+                </button>
+              </div>
+              <button
+                type="button"
+                className={chip}
+                onClick={() => {
+                  simRef.current?.clearBodies();
+                  setFea(null);
+                }}
+              >
+                Clear solids
+              </button>
+              <Slider
+                label="Solid size"
+                min={1.2}
+                max={6}
+                step={0.1}
+                value={solidSize}
+                digits={1}
+                onChange={(n) => {
+                  setSolidSize(n);
+                  if (simRef.current?.hasBody) simRef.current.reshape(solid, n);
+                }}
+              />
+              <Slider label="Inlet temperature" min={0} max={120} step={1} value={tIn} digits={0} onChange={setTIn} />
+              <Slider label="Solid temperature" min={0} max={120} step={1} value={tWall} digits={0} onChange={setTWall} />
+              <Slider label="Ambient temperature" min={0} max={80} step={1} value={tAmb} digits={0} onChange={setTAmb} />
+              <Slider label="Thermal diffusion" min={0} max={0.35} step={0.01} value={kappa} digits={2} onChange={setKappa} />
+              <Slider label="Streamwise pressure gradient" min={-1.5} max={1.5} step={0.05} value={gradP} digits={2} onChange={setGradP} />
+              <div className="rounded-md border border-border bg-surface p-3">
+                <p className="text-xs text-muted">Measured inlet-to-outlet pressure drop</p>
+                <p className="mt-1 font-mono text-sm text-primary tabular-nums">{num(drop, 3)}</p>
+                <p className="mt-2 text-pretty text-sm text-muted">Positive gradient pushes the fluid downstream, on top of whatever the inlet is doing.</p>
+              </div>
+              <Slider label="Young’s modulus" min={0.2} max={20} step={0.1} value={young} digits={1} onChange={setYoung} />
+              <div className="rounded-md border border-border bg-surface p-3">
+                <p className="text-xs text-muted">Section FEA · ν = 0.30</p>
+                <p className="mt-1 font-mono text-sm text-primary tabular-nums">
+                  σ {fea ? fea.maxVonMises.toExponential(2) : "—"} · |u| {fea ? fea.maxDisp.toExponential(2) : "—"}
+                </p>
+                <p className="mt-1 font-mono text-xs text-muted">
+                  {fea ? `${fea.nodes} nodes · ${fea.triangles} triangles · p̄ ${num(fea.meanPressure, 2)}` : "no section yet"}
+                </p>
+                <canvas ref={feaRef} className="mt-2 h-28 w-full rounded-md border border-border bg-bg" />
+                <p className="mt-2 text-pretty text-sm text-muted">{fea?.note}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {panel === "skills" ? (
+            <div className="flex flex-col gap-4 p-4">
+              <div className="flex flex-wrap gap-2">
+                {SKILLS.map((s) => (
+                  <button key={s.id} type="button" aria-pressed={s.id === skillId} className={`${chip} ${s.id === skillId ? chipOn : ""}`} onClick={() => setSkillId(s.id)}>
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+              <div>
+                <p className="font-mono text-xs tracking-wide text-primary">{skill.subject}</p>
+                <h2 className="mt-1 text-balance text-base font-semibold">{skill.name}</h2>
+                <p className="mt-2 text-pretty text-sm text-muted">{skill.claim}</p>
+                <p className="mt-2 text-pretty text-sm text-fg">{skill.machine}</p>
+              </div>
+              {priced ? (
+                <div className="flex flex-col gap-3">
+                  {skillId === "blackscholes" ? (
+                    <Slider label="Volatility σ" min={0.05} max={0.8} step={0.01} value={sigma} digits={2} onChange={setSigma} />
+                  ) : (
+                    <Slider label="Vol of vol ξ" min={0} max={1.4} step={0.02} value={xi} digits={2} onChange={setXi} />
+                  )}
+                  <canvas ref={chartRef} className="h-28 w-full rounded-md border border-border bg-surface" />
+                  <p className="text-pretty text-sm text-muted">{reading}</p>
+                </div>
+              ) : (
+                <div className="rounded-md border border-border bg-surface p-3">
+                  <p className="text-xs text-muted">{fluidSkill?.meter ?? "live meter"}</p>
+                  <p className="mt-1 font-mono text-sm text-primary tabular-nums">{fluidSkill?.value ?? "—"}</p>
+                  <p className="mt-2 text-pretty text-sm text-muted">{reading || fluidSkill?.note}</p>
+                </div>
+              )}
             </div>
           ) : null}
 
@@ -597,26 +760,19 @@ export function Bench() {
                 <Stat label="FP32" value={GPU.fp32.toLocaleString("en-US")} />
                 <Stat label="VRAM" value={`${GPU.vramGb} GB`} />
                 <Stat label="Bus" value={`${GPU.bandwidthGBps} GB/s`} />
-                <Stat label="L2" value={`${GPU.l2Mb} MB`} />
-                <Stat label="Boost" value={`${GPU.boostGhz} GHz`} />
               </dl>
-              <RigRow title={CPU.name} meta={`${CPU.arch} · ${CPU.cores} cores / ${CPU.threads} threads · ${CPU.l3Mb} MB L3`} />
-              <Stat label="Host memory" value={`${CPU.ramGb} GB`} />
+              <RigRow title={CPU.name} meta={`${CPU.arch} · ${CPU.cores} cores / ${CPU.threads} threads`} />
               <div className="rounded-md border border-border bg-surface p-3 font-mono text-xs leading-5 text-fg">
+                <p>block 8×4×8</p>
                 <p>
-                  block {plan.block}×{plan.block}
+                  grid {plan.gridX}×{plan.gridY}×{plan.gridZ}
                 </p>
-                <p>
-                  grid {plan.gridX}×{plan.gridY}
-                </p>
-                <p>{plan.threads.toLocaleString("en-US")} threads launched</p>
-                <p>{formatBytes(plan.bytes)} field storage</p>
-                <p>Jacobi sweep ≈ {plan.dramMs.toFixed(4)} ms at DRAM peak</p>
-                <p className="mt-2 text-muted">{plan.fitsL2 ? "Fits in L2" : "Exceeds L2"}</p>
+                <p>{formatBytes(plan.bytes)} if this volume is resident</p>
+                <p className="mt-2 text-muted">{plan.fitsL2 ? "Fits in the 6 MB L2" : "Larger than L2"}</p>
               </div>
               <p className="text-pretty text-sm text-muted">{plan.note}</p>
               <p className="text-pretty text-sm text-muted">
-                The live field runs in the browser on the CPU, which is the 5900X’s job: reductions, traces, and this reference. The card kernels are in the next tab. A browser cannot put this process on the 3090 Ti.
+                This page runs the volume on the CPU so you can see it. The card gets karman3d.cu: one file, nvcc, sm_86, no library between you and the SMs.
               </p>
             </div>
           ) : null}
@@ -625,13 +781,7 @@ export function Bench() {
             <div className="flex flex-col gap-3 p-4">
               <div className="flex flex-wrap gap-2">
                 {KERNELS.map((k) => (
-                  <button
-                    key={k.id}
-                    type="button"
-                    aria-pressed={k.id === kernel.id}
-                    className={`${chip} ${k.id === kernel.id ? chipOn : ""}`}
-                    onClick={() => setKernelId(k.id)}
-                  >
+                  <button key={k.id} type="button" aria-pressed={k.id === kernel.id} className={`${chip} ${k.id === kernel.id ? chipOn : ""}`} onClick={() => setKernelId(k.id)}>
                     {k.label}
                   </button>
                 ))}
@@ -647,15 +797,46 @@ export function Bench() {
                   {kernel.filename}
                 </button>
               </div>
-              <pre className="max-h-96 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-xs leading-5 text-fg">
-                {kernel.source}
-              </pre>
+              <pre className="max-h-96 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-xs leading-5 text-fg">{kernel.source}</pre>
             </div>
           ) : null}
         </aside>
       </div>
     </div>
   );
+}
+
+function paintSpark(canvas: HTMLCanvasElement, data: Float32Array, n: number, cursor: number): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx || n < 2) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#1a211e";
+  ctx.fillRect(0, 0, w, h);
+  let lo = Infinity;
+  let hi = -Infinity;
+  const values: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = data[(cursor - n + i + data.length) % data.length]!;
+    values.push(v);
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  if (hi - lo < 1e-6) {
+    lo -= 1;
+    hi += 1;
+  }
+  ctx.beginPath();
+  for (let i = 0; i < values.length; i++) {
+    const x = (i / (values.length - 1)) * (w - 4) + 2;
+    const y = h - 3 - ((values[i]! - lo) / (hi - lo)) * (h - 6);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = "#e39b2b";
+  ctx.lineWidth = 1.25;
+  ctx.stroke();
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -699,21 +880,13 @@ function Slider({
         <span>{label}</span>
         <span className="font-mono text-fg tabular-nums">{value.toFixed(digits)}</span>
       </span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="h-11 w-full accent-primary"
-      />
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="h-11 w-full accent-primary" />
     </label>
   );
 }
 
-const btn =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg hover:border-primary";
+const btn = "inline-flex h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg hover:border-primary";
+const zoomBtn = "inline-flex h-11 w-11 items-center justify-center rounded-md border border-border bg-bg/80 text-lg text-fg hover:border-primary";
 const chip = "inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface px-3 text-sm text-fg";
 const chipOn = "border-primary text-primary";
 const field = "h-11 rounded-md border border-border bg-surface px-2 text-sm text-fg";

@@ -3,8 +3,9 @@ export const F_SOLID = 1;
 export const F_INLET = 2;
 export const F_LID = 3;
 export const F_BODY = 4;
+export const F_OUTLET = 5;
 
-export type ViewMode = "dye" | "vorticity" | "speed" | "pressure";
+export type ViewMode = "dye" | "vorticity" | "speed" | "pressure" | "temperature";
 
 export type ToolMode = "stir" | "wall" | "erase" | "probe";
 
@@ -49,6 +50,11 @@ export type SimParams = {
   buoyancy: number;
   iterations: number;
   dyeDecay: number;
+  gradP?: number;
+  tIn?: number;
+  tWall?: number;
+  tAmb?: number;
+  kappa?: number;
 };
 
 export type SimStats = {

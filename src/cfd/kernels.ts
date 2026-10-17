@@ -1,3 +1,5 @@
+import { CUDA3D } from "./cuda3d";
+
 export type KernelFile = {
   id: string;
   label: string;
@@ -338,6 +340,13 @@ ke_fluid:
 `;
 
 export const KERNELS: readonly KernelFile[] = [
+  {
+    id: "cu3",
+    label: "3D CUDA",
+    filename: "karman3d.cu",
+    blurb: "The whole 3D suite in one file. nvcc -O3 -arch=sm_86 --use_fast_math -o karman3d karman3d.cu && ./karman3d karman 64 32 32 400",
+    source: CUDA3D,
+  },
   {
     id: "cu",
     label: "CUDA C",
