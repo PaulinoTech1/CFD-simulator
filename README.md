@@ -1,27 +1,24 @@
 # CFD simulator
 
-3D incompressible Navier–Stokes bench, plus the same method as one bare CUDA C file for an RTX 3090 Ti (GA102, sm_86). The host notes are for a Ryzen 9 5900X.
+A 3D incompressible bench, plus a staggered MAC reference that has been checked against a few laminar solutions. This is not an engineering-validated CFD package.
 
-The live volume is a collocated projection: semi-Lagrangian advection, Jacobi/SOR pressure, dye, a temperature field, and an imposed streamwise pressure gradient. Solids are voxel shapes you can swap in the Suite tab: sphere, cylinder, box, cone, plate, NACA 0012. The mid-span cut of a solid is a plane-stress finite-element section loaded by the fluid pressure.
+The picture in the browser is still a collocated CPU preview. It does not run on the GPU. The checked solver is `src/cfd/mac.ts` (double precision) and the host path of `kernels/karman3d.cu`. Stored pressure is kinematic, `φ = p/ρ`.
 
-The browser runs the reference solver on the CPU. It does not launch the GPU.
-
-## Kernels
-
-| File | Target |
-| --- | --- |
-| `kernels/karman3d.cu` | The 3D suite. CUDA C, sm_86, no CFD library |
-| `kernels/karman_ga102.cu` | 2D CUDA C, 16×16 blocks, shared-memory Jacobi |
-| `kernels/divergence_sm86.ptx` | Hand-written PTX divergence stencil |
-| `kernels/znver3_ke.s` | AVX2 kinetic-energy reduction for Zen 3 |
+## Checks
 
 ```text
-nvcc -O3 -arch=sm_86 --use_fast_math -o karman3d kernels/karman3d.cu
-./karman3d karman  64 32 32 400
-./karman3d airfoil 64 32 32 400 0.2
+node --experimental-strip-types --test verify/numerics.test.mjs
+g++ -O2 -std=c++17 -DKARMAN_CPU -x c++ -o karman3d kernels/karman3d.cu
+./karman3d
 ```
 
-Presets: `karman`, `airfoil`, `cavity`, `plume`, `jet`, `kelvin`, `ink`. Arguments are preset, `nx ny nz`, steps, and an optional streamwise pressure gradient.
+`nvcc` and a GPU were not available where those checks were run. Device execution is unverified. For a 3090 Ti, compile with `-arch=sm_86` and do not add `--use_fast_math` until that flag has been measured against the same checks.
+
+```text
+nvcc -O3 -arch=sm_86 -o karman3d kernels/karman3d.cu
+```
+
+What passed, and what did not, is in [docs/numerical-status.md](docs/numerical-status.md).
 
 ## Web bench
 
@@ -30,4 +27,4 @@ npm install
 npm run dev
 ```
 
-Cases: Kármán street, NACA 0012, lid cavity, thermal plume, round jet, Kelvin–Helmholtz, stirred ink. Orbit the volume, scroll or pinch to zoom, and use Suite to change the solid, the temperatures, and the pressure gradient.
+The Suite tab can still place voxel solids and estimate a plane-stress section. That section is an experimental one-way load, not fluid-structure interaction.

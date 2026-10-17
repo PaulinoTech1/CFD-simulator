@@ -554,6 +554,9 @@ export function Bench() {
           {panel === "field" ? (
             <div className="flex flex-col gap-4 p-4">
               <p className="text-pretty text-sm text-muted">{info.blurb}</p>
+              <p className="text-pretty text-xs text-muted">
+                This picture is the CPU preview: collocated semi-Lagrangian, fixed pressure iterations. It is not a verified projection. The checked scheme is the staggered MAC solver in double precision, run headless. GPU execution of kernels/karman3d.cu is unverified in this environment.
+              </p>
               <div className="flex flex-wrap gap-2">
                 {PRESETS3.map((p) => (
                   <button
@@ -704,7 +707,7 @@ export function Bench() {
               </div>
               <Slider label="Young’s modulus" min={0.2} max={20} step={0.1} value={young} digits={1} onChange={setYoung} />
               <div className="rounded-md border border-border bg-surface p-3">
-                <p className="text-xs text-muted">Section FEA · ν = 0.30</p>
+                <p className="text-xs text-muted">Experimental section · one-way plane stress · not FSI · ν = 0.30</p>
                 <p className="mt-1 font-mono text-sm text-primary tabular-nums">
                   σ {fea ? fea.maxVonMises.toExponential(2) : "—"} · |u| {fea ? fea.maxDisp.toExponential(2) : "—"}
                 </p>
