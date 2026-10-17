@@ -12,6 +12,8 @@ The defects below were present at `0ba2500` and are fixed in the TypeScript MAC 
 
 The native file `kernels/karman3d.cu` was not brought up to this scheme. The browser picture is still the collocated preview. Taylor–Green remains near first order; that tolerance was not loosened.
 
+
+The handoff sequence for the 3090 Ti is in [docs/target-machine.md](target-machine.md). `scripts/build.sh` builds the host path first. `scripts/mac-run.mjs` is the headless Couette check.
 ## Earlier baseline
 
 Baseline commit before the MAC reference: `aac72f47fddcd381d941dddcd600796b8bf00633`.

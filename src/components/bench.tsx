@@ -622,7 +622,7 @@ export function Bench() {
               <Slider label="Pressure iterations" min={4} max={20} step={1} value={iterations} digits={0} onChange={setIterations} />
               <div>
                 <div className="mb-1 flex justify-between text-xs text-muted">
-                  <span>Cl trace</span>
+                  <span>Cl (preview) trace</span>
                   <span className="font-mono text-fg">{num(hud.cl, 2)}</span>
                 </div>
                 <canvas ref={sparkRef} className="h-12 w-full rounded-md border border-border bg-surface" />
@@ -775,7 +775,7 @@ export function Bench() {
               </div>
               <p className="text-pretty text-sm text-muted">{plan.note}</p>
               <p className="text-pretty text-sm text-muted">
-                This page runs the volume on the CPU so you can see it. The card gets karman3d.cu: one file, nvcc, sm_86, no library between you and the SMs.
+                This page runs the volume on the CPU so you can see it. The 3090 Ti is the target card, not the device running this page. Device execution of karman3d.cu is unverified. On that machine: one file, nvcc, sm_86, no library between you and the SMs.
               </p>
             </div>
           ) : null}
