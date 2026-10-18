@@ -1,6 +1,8 @@
 // Experimental models for analysis types that are not the checked incompressible path.
 // Each function runs a small calculation. None is a verified solver.
 
+import { latticeRun } from "./lattice.ts";
+
 export type ExpInput = {
   re: number;
   uIn: number;
@@ -52,14 +54,13 @@ export function runExperimental(id: string, p: ExpInput): ExpResult {
 }
 
 function lbm(p: ExpInput): ExpResult {
-  const cs2 = 1 / 3;
-  const tau = 0.5 + (3 * p.re > 0 ? 1 / p.re : 0.1);
-  const nu = cs2 * (tau - 0.5);
-  const mach = Math.abs(p.uIn) / A_SOUND;
+  const tau = 0.8;
+  const run = latticeRun(16, 16, 4, tau);
+  const nu = (1 / 3) * (tau - 0.5);
   return {
-    title: "LBM estimate",
-    value: `τ = ${tau.toFixed(3)} · ν_lb = ${nu.toExponential(2)}`,
-    detail: `D3Q19 viscosity from τ. Mach ${mach.toExponential(2)} at the inlet. This is not a lattice Boltzmann solve.`,
+    title: "LBM step",
+    value: `ρ̄ = ${run.meanDensity.toFixed(4)} · |u|max = ${run.maxSpeed.toExponential(2)}`,
+    detail: `D2Q9 collide-stream, ${run.steps} steps, τ = ${tau}, ν_lb = ${nu.toExponential(2)}. Not a 3D lattice Boltzmann solve.`,
   };
 }
 
