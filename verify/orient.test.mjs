@@ -54,6 +54,24 @@ describe("solid orientation", () => {
     assert.notEqual(plate.di.toFixed(2), plateTurned.di.toFixed(2));
   });
 
+  it("rolls a cylinder upright and banks an airfoil", () => {
+    const sim = new Fluid3();
+    sim.load(buildScene3("ink", 16));
+    sim.reshape("cylinder", 2.4);
+    const lying = spread(sim);
+    sim.setOrientation(0, 0, 90);
+    const upright = spread(sim);
+    assert.ok(lying.dk > lying.dj);
+    assert.ok(upright.dj > upright.dk, `roll left the cylinder along z ${upright.dk} vs ${upright.dj}`);
+    sim.setOrientation(0, 0, 0);
+    sim.reshape("airfoil", 2.4);
+    const flat = spread(sim);
+    sim.setOrientation(0, 0, 90);
+    const twisted = spread(sim);
+    assert.ok(flat.dk > flat.dj);
+    assert.ok(twisted.dj > twisted.dk);
+  });
+
   it("leaves a sphere unchanged", () => {
     const sim = new Fluid3();
     sim.load(buildScene3("ink", 16));

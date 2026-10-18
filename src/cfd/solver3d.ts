@@ -44,9 +44,10 @@ export class Fluid3 {
   cz = 0;
   radius = 1;
   aoa = 0;
-  /** Degrees. Yaw is about the vertical axis. Pitch tilts the shape. */
+  /** Degrees. Yaw is about vertical, pitch tilts, roll twists the remaining axis. */
   yaw = 0;
   pitch = 0;
+  roll = 0;
   charLength = 1;
   divResidual = 0;
   dissipation = 0;
@@ -295,9 +296,10 @@ export class Fluid3 {
     return n;
   }
 
-  setOrientation(yaw: number, pitch: number): void {
+  setOrientation(yaw: number, pitch: number, roll = 0): void {
     this.yaw = yaw;
     this.pitch = pitch;
+    this.roll = roll;
     if (this.hasBody && this.bodyKind !== "none") this.reshape(this.bodyKind, this.radius);
   }
 
@@ -327,6 +329,9 @@ export class Fluid3 {
     const sy = Math.sin(yaw);
     const cp = Math.cos(pitch);
     const sp = Math.sin(pitch);
+    const roll = (this.roll * Math.PI) / 180;
+    const cr = Math.cos(roll);
+    const sr = Math.sin(roll);
     for (let k = k0; k <= k1; k++) {
       for (let j = j0; j <= j1; j++) {
         for (let i = i0; i <= i1; i++) {
@@ -338,9 +343,11 @@ export class Fluid3 {
           const dz0 = k - z;
           const x1 = cy * dx0 + sy * dz0;
           const z1 = -sy * dx0 + cy * dz0;
-          const dx = cp * x1 + sp * dy0;
-          const dy = -sp * x1 + cp * dy0;
-          const dz = z1;
+          const dxp = cp * x1 + sp * dy0;
+          const dyp = -sp * x1 + cp * dy0;
+          const dx = dxp;
+          const dy = cr * dyp - sr * z1;
+          const dz = sr * dyp + cr * z1;
           let inside = false;
           if (kind === "sphere") inside = dx * dx + dy * dy + dz * dz <= r * r;
           else if (kind === "cylinder") inside = dx * dx + dy * dy <= r * r && Math.abs(dz) <= r * 1.6;

@@ -44,7 +44,7 @@ const ANALYSIS_LABEL: Record<AnalysisId, string> = {
   frequency: "Frequency analysis (experimental)",
   nonlinear: "Nonlinear mechanical (experimental)",
 };
-type Tool = "orbit" | "stir" | "place" | "erase";
+type Tool = "orbit" | "stir" | "place" | "erase" | "turn";
 type Hud = SimStats & { stepMs: number; cells: string; hover: string };
 
 const ZERO: Hud = {
@@ -91,6 +91,7 @@ export function Bench() {
   const [solidSize, setSolidSize] = useState(2.4);
   const [yaw, setYaw] = useState(0);
   const [pitch, setPitch] = useState(0);
+  const [roll, setRoll] = useState(0);
   const [gradP, setGradP] = useState(0);
   const [tIn, setTIn] = useState(20);
   const [tWall, setTWall] = useState(20);
@@ -152,6 +153,7 @@ export function Bench() {
     solidSize,
     yaw,
     pitch,
+    roll,
     skillId,
     presetId,
   });
@@ -176,6 +178,7 @@ export function Bench() {
     solidSize,
     yaw,
     pitch,
+    roll,
     skillId,
     presetId,
   };
@@ -233,7 +236,7 @@ export function Bench() {
     });
     sim.load(scene);
     if (live.current.yaw !== 0 || live.current.pitch !== 0) {
-      sim.setOrientation(live.current.yaw, live.current.pitch);
+      sim.setOrientation(live.current.yaw, live.current.pitch, live.current.roll);
     }
     let lastSt: SimStats | null = null;
     const warmStart = performance.now();
@@ -304,10 +307,10 @@ export function Bench() {
           setDrop(sim.pressureDrop());
           setFea(sectionFea(sim, live.current.young, 0.3));
           const cells = sim.bodyCells();
-          const round = sim.bodyKind === "sphere" ? " · sphere ignores yaw and pitch" : "";
+          const round = sim.bodyKind === "sphere" ? " · a sphere does not change" : "";
           setShapeNote(
             cells > 0
-              ? `${sim.bodyKind}: ${cells} solid cells · yaw ${sim.yaw.toFixed(0)}° · pitch ${sim.pitch.toFixed(0)}°${round}`
+              ? `${sim.bodyKind}: ${cells} solid cells · yaw ${sim.yaw.toFixed(0)}° · pitch ${sim.pitch.toFixed(0)}° · roll ${sim.roll.toFixed(0)}°${round}`
               : "No solid cells. The shape button did not stamp, or Clear solids removed them.",
           );
         }
@@ -317,6 +320,8 @@ export function Bench() {
         const toolName =
           live.current.tool === "orbit"
             ? "drag to orbit"
+            : live.current.tool === "turn"
+              ? "drag to yaw and pitch · shift-drag to roll"
             : live.current.tool === "place"
               ? "click to place the solid"
               : live.current.tool === "erase"
@@ -438,6 +443,7 @@ export function Bench() {
     lastPtr.current = p;
     if (live.current.tool === "place" || live.current.tool === "erase") sculpt(p);
     else if (live.current.tool === "stir") stir(p, p);
+    else if (live.current.tool === "turn") turnSolid(p, p, e.shiftKey);
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -455,9 +461,26 @@ export function Bench() {
     if (live.current.tool === "orbit") {
       cam.current.yaw += (p.x - lastPtr.current.x) * 0.01;
       cam.current.pitch = Math.max(-1.1, Math.min(1.1, cam.current.pitch + (p.y - lastPtr.current.y) * 0.008));
-    } else if (live.current.tool === "erase") sculpt(p);
+    } else if (live.current.tool === "turn") turnSolid(lastPtr.current, p, e.shiftKey);
+    else if (live.current.tool === "erase") sculpt(p);
     else if (live.current.tool === "stir") stir(lastPtr.current, p);
     lastPtr.current = p;
+  }
+
+  function turnSolid(prev: { x: number; y: number }, next: { x: number; y: number }, shift: boolean) {
+    const sim = simRef.current;
+    if (!sim?.hasBody) return;
+    if (shift) {
+      const nextRoll = wrap180(live.current.roll + (next.x - prev.x) * 0.7);
+      setRoll(nextRoll);
+      sim.setOrientation(live.current.yaw, live.current.pitch, nextRoll);
+      return;
+    }
+    const nextYaw = wrap180(live.current.yaw + (next.x - prev.x) * 0.7);
+    const nextPitch = wrap180(live.current.pitch - (next.y - prev.y) * 0.7);
+    setYaw(nextYaw);
+    setPitch(nextPitch);
+    sim.setOrientation(nextYaw, nextPitch, live.current.roll);
   }
 
   function sculpt(p: { x: number; y: number; w: number; h: number }) {
@@ -870,9 +893,12 @@ export function Bench() {
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 <button type="button" aria-pressed={tool === "orbit"} className={`${chip} ${tool === "orbit" ? chipOn : ""}`} onClick={() => setTool("orbit")}>
                   Orbit
+                </button>
+                <button type="button" aria-pressed={tool === "turn"} className={`${chip} ${tool === "turn" ? chipOn : ""}`} onClick={() => setTool("turn")}>
+                  Turn
                 </button>
                 <button type="button" aria-pressed={tool === "place"} className={`${chip} ${tool === "place" ? chipOn : ""}`} onClick={() => setTool("place")}>
                   Move
@@ -912,23 +938,35 @@ export function Bench() {
                 digits={0}
                 onChange={(n) => {
                   setYaw(n);
-                  simRef.current?.setOrientation(n, pitch);
+                  simRef.current?.setOrientation(n, pitch, roll);
                 }}
               />
               <Slider
                 label="Pitch"
-                min={-90}
-                max={90}
+                min={-180}
+                max={180}
                 step={5}
                 value={pitch}
                 digits={0}
                 onChange={(n) => {
                   setPitch(n);
-                  simRef.current?.setOrientation(yaw, n);
+                  simRef.current?.setOrientation(yaw, n, roll);
+                }}
+              />
+              <Slider
+                label="Roll"
+                min={-180}
+                max={180}
+                step={5}
+                value={roll}
+                digits={0}
+                onChange={(n) => {
+                  setRoll(n);
+                  simRef.current?.setOrientation(yaw, pitch, n);
                 }}
               />
               <p className="text-pretty text-sm text-muted">
-                Yaw turns the solid about the vertical axis. Pitch tilts it. Cone, cylinder, plate, box, and airfoil restamp. A sphere does not change.
+                Yaw, pitch, and roll each run a full turn, so the solid can face any way. Turn drags yaw and pitch. Shift-drag rolls. A round sphere still does not change. A round cylinder does not change if you only roll it about its own axis.
               </p>
               <div className="rounded-md border border-border bg-surface p-3">
                 <p className="text-xs text-muted">Geometry</p>
@@ -1050,6 +1088,11 @@ export function Bench() {
       </div>
     </div>
   );
+}
+
+function wrap180(deg: number): number {
+  const turns = (((deg + 180) % 360) + 360) % 360;
+  return turns - 180;
 }
 
 function paintSpark(canvas: HTMLCanvasElement, data: Float32Array, n: number, cursor: number): void {
