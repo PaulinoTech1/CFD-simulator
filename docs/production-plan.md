@@ -175,3 +175,4 @@ If a phase misses its acceptance test, stop, write the measured number, and do n
 | --- | --- | --- |
 | 2026-10-18 | `b00cae4` | Plan written. Oracle tests green. Host binary checks shear decay and one projection only. GPU unverified. |
 | 2026-10-18 | this change | Phases 0–8 landed as tests. Phase 2 host Couette is the 1D reduction, not a full operator port. Phase 6 runs the MAC scheme headless on the bench span; the canvas is still the preview. Phase 9 skips: no nvcc. |
+| 2026-10-18 | browser checks | Run checks executes the MAC shear, heat-rest, and Couette cases in the page and prints PASS or FAIL. The picture is unchanged. |

@@ -286,6 +286,12 @@ export class Fluid3 {
     }
   }
 
+  bodyCells(): number {
+    let n = 0;
+    for (let i = 0; i < this.flags.length; i++) if (this.flags[i] === F_BODY) n++;
+    return n;
+  }
+
   reshape(kind: BodyKind, size: number, at?: { x: number; y: number; z: number }): void {
     const x = at?.x ?? this.cx;
     const y = at?.y ?? this.cy;

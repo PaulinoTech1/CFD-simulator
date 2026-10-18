@@ -10,6 +10,8 @@ import { runExperimental } from "@/cfd/experimental";
 import { Fluid3 } from "@/cfd/solver3d";
 import type { SimParams, SimStats, ViewMode } from "@/cfd/types";
 import { GUIDE, Guide, guideWasFinished, markGuideFinished } from "@/components/guide";
+import { couetteCase, couetteError, couetteJson, runHeatRestCheck, runShearCheck } from "@/cfd/checks";
+import { MacSolver } from "@/cfd/mac";
 
 const SPANS = [16, 24, 32, 48, 64] as const;
 const SPAN_NAME: Record<(typeof SPANS)[number], string> = {
@@ -103,6 +105,10 @@ export function Bench() {
   const [dist, setDist] = useState(43);
   const [guideOpen, setGuideOpen] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
+  const [checkLines, setCheckLines] = useState<string[]>(["No browser check yet. The picture is not a check."]);
+  const [checkRunning, setCheckRunning] = useState(false);
+  const [copyNote, setCopyNote] = useState("");
+  const [shapeNote, setShapeNote] = useState("No solid stamped yet.");
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sparkRef = useRef<HTMLCanvasElement>(null);
@@ -121,6 +127,7 @@ export function Bench() {
   const cam = useRef<Camera>({ yaw: 0.7, pitch: 0.38, dist: 48 });
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef(0);
+  const checkToken = useRef(0);
 
   const live = useRef({
     view,
@@ -287,6 +294,8 @@ export function Bench() {
         if (live.current.panel === "suite") {
           setDrop(sim.pressureDrop());
           setFea(sectionFea(sim, live.current.young, 0.3));
+          const cells = sim.bodyCells();
+          setShapeNote(cells > 0 ? `${sim.bodyKind}: ${cells} solid cells` : "No solid cells. The shape button did not stamp, or Clear solids removed them.");
         }
         if (live.current.skillId !== "blackscholes" && live.current.skillId !== "heston") {
           setReading(readVolume(sim, { re: live.current.re, preset: live.current.presetId }, live.current.skillId).note);
@@ -474,20 +483,56 @@ export function Bench() {
     try {
       await navigator.clipboard.writeText(kernel.source);
       setCopied(true);
+      setCopyNote("");
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
       setCopied(false);
+      setCopyNote("Copy was blocked by the browser. Download the file instead.");
     }
   }
 
   function downloadKernel() {
-    const blob = new Blob([kernel.source], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = kernel.filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadText(kernel.filename, kernel.source);
+  }
+
+  function downloadCouette() {
+    downloadText("couette.json", couetteJson());
+  }
+
+  function runBrowserCheck() {
+    const token = checkToken.current + 1;
+    checkToken.current = token;
+    setCheckRunning(true);
+    const shear = runShearCheck();
+    const heat = runHeatRestCheck();
+    const sim = new MacSolver(couetteCase());
+    const head = [
+      `Shear ${shear.pass ? "PASS" : "FAIL"} · ${shear.value}`,
+      `Heat rest ${heat.pass ? "PASS" : "FAIL"} · ${heat.value}`,
+    ];
+    setCheckLines([...head, "Couette running. This is the MAC solver, not the picture."]);
+    const pump = () => {
+      if (checkToken.current !== token) return;
+      const started = performance.now();
+      while (sim.time < 12 && performance.now() - started < 32) {
+        const report = sim.step(sim.stableDt());
+        if (report.status !== "ok") {
+          setCheckLines([...head, `Couette FAIL · ${report.detail}`]);
+          setCheckRunning(false);
+          return;
+        }
+      }
+      const err = couetteError(sim);
+      if (sim.time >= 12) {
+        const pass = err < 1e-3;
+        setCheckLines([...head, `Couette ${pass ? "PASS" : "FAIL"} · t=${sim.time.toFixed(2)} · max|u−line|=${err.toExponential(2)} · limit 1e-3`]);
+        setCheckRunning(false);
+        return;
+      }
+      setCheckLines([...head, `Couette running · t=${sim.time.toFixed(2)} · max|u−line|=${err.toExponential(2)}`]);
+      window.setTimeout(pump, 0);
+    };
+    window.setTimeout(pump, 0);
   }
 
   const plan = planVolume(span * 2, span, span);
@@ -633,13 +678,33 @@ export function Bench() {
               </p>
               <p className="font-mono text-xs text-primary" aria-live="polite">Selected: {ANALYSIS_LABEL[analysis]}</p>
               <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-border bg-surface p-3">
-                <p className="text-xs text-muted">{exp.title}</p>
-                <p className="mt-1 font-mono text-sm text-primary tabular-nums">{exp.value}</p>
-                <p className="mt-1 text-pretty text-sm text-muted">{exp.detail}</p>
+                {analysis === "incompressible" ? (
+                  <>
+                    <p className="text-xs text-muted">MAC checks on this page</p>
+                    {checkLines.map((line) => (
+                      <p key={line} className="mt-1 font-mono text-sm text-primary">{line}</p>
+                    ))}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="button" className={btn} disabled={checkRunning} onClick={runBrowserCheck}>
+                        {checkRunning ? "Running" : "Run checks"}
+                      </button>
+                      <button type="button" className={btn} onClick={downloadCouette}>
+                        <Download className="size-4" />
+                        couette.json
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted">{exp.title}</p>
+                    <p className="mt-1 font-mono text-sm text-primary tabular-nums">{exp.value}</p>
+                    <p className="mt-1 text-pretty text-sm text-muted">{exp.detail}</p>
+                  </>
+                )}
               </div>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">FLOW</p>
-                <AnalysisRow name="Incompressible" status="available" selected={analysis === "incompressible"} onSelect={() => { setAnalysis("incompressible"); setBuoyancy(0); setPanel("field"); }} note="Checked path. Constant-density Newtonian laminar flow on a structured grid." />
+                <AnalysisRow name="Incompressible" status="available" selected={analysis === "incompressible"} onSelect={() => { setAnalysis("incompressible"); setBuoyancy(0); }} note="Checked path. Run checks uses the MAC solver in this page. The picture stays the preview." />
                 <AnalysisRow name="Incompressible (LBM)" status="experimental" selected={analysis === "lbm"} onSelect={() => setAnalysis("lbm")} note="Runs a periodic D2Q9 step and checks density and momentum. Not coupled to this volume." />
                 <AnalysisRow name="Multi-purpose" status="experimental" selected={analysis === "multipurpose"} onSelect={() => setAnalysis("multipurpose")} note="Exposes the same incompressible fields with heat and section controls available. Not a multiphysics coupling." />
                 <AnalysisRow name="Pedestrian wind comfort" status="experimental" selected={analysis === "comfort"} onSelect={() => setAnalysis("comfort")} note="Classifies the preview max speed at 4, 6, and 8 m/s. No exceedance probability." />
@@ -761,8 +826,9 @@ export function Bench() {
 
           {panel === "suite" ? (
             <div className="flex flex-col gap-4 p-4">
+              <p className="font-mono text-xs text-primary" aria-live="polite">{shapeNote}</p>
               <p className="text-pretty text-sm text-muted">
-                Pick a shape and it replaces the solid. Drag the picture to orbit it. Move, then click, to reposition it.
+                Pick a shape and it replaces the solid. The count above is the cells that are solid. Drag the picture to orbit it. Move, then click, to reposition it.
               </p>
               <div className="flex flex-wrap gap-2">
                 {(
@@ -935,6 +1001,7 @@ export function Bench() {
                   {kernel.filename}
                 </button>
               </div>
+              {copyNote ? <p className="text-sm text-muted" role="status">{copyNote}</p> : null}
               <pre className="max-h-96 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-xs leading-5 text-fg">{kernel.source}</pre>
             </div>
           ) : null}
@@ -1023,7 +1090,17 @@ function Slider({
   );
 }
 
-const btn = "inline-flex h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg hover:border-primary";
+function downloadText(filename: string, text: string): void {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const btn = "inline-flex h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg hover:border-primary disabled:cursor-not-allowed disabled:opacity-40";
 const zoomBtn = "inline-flex h-11 w-11 items-center justify-center rounded-md border border-border bg-bg/80 text-lg text-fg hover:border-primary";
 const chip = "inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface px-3 text-sm text-fg";
 const chipOn = "border-primary text-primary";
