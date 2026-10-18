@@ -243,6 +243,33 @@ int main() {
         std::printf("project  div %.3e  iters %d  residual %.3e  %s\n", div, iters, residual, pass ? "PASS" : "FAIL");
         if (!pass) ++failures;
     }
+    {
+        const int n = 32;
+        const double nu = 0.05;
+        const double speed = 1.0;
+        const double dy = 1.0 / n;
+        std::vector<double> u(n, 0.0);
+        double time = 0;
+        const double dt = 0.2 * dy * dy / nu;
+        while (time < 40.0) {
+            std::vector<double> next(n);
+            const double south = -u[0];
+            const double north = 2.0 * speed - u[n - 1];
+            const double coef = nu * dt / (dy * dy);
+            for (int j = 0; j < n; ++j) {
+                const double um = j == 0 ? south : u[j - 1];
+                const double up = j == n - 1 ? north : u[j + 1];
+                next[j] = u[j] + coef * (um - 2.0 * u[j] + up);
+            }
+            u.swap(next);
+            time += dt;
+        }
+        double err = 0;
+        for (int j = 0; j < n; ++j) err = std::max(err, std::abs(u[j] - speed * (j + 0.5) * dy));
+        const bool pass = err < 1e-8;
+        std::printf("couette1d  err %.3e  %s\n", err, pass ? "PASS" : "FAIL");
+        if (!pass) ++failures;
+    }
     std::printf("gpu  nvcc=%d  device-check=not-run  UNVERIFIED\n", KARMAN_HAS_CUDA);
     std::printf(failures ? "FAILED %d\n" : "OK\n", failures);
     return failures ? 1 : 0;

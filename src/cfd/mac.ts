@@ -69,6 +69,8 @@ export class MacSolver {
    * Not a physical model.
    */
   failAtSubstep: number | null = null;
+  /** "cg" is the reference projection. "jacobi" must match it on the same operator. */
+  pressureSolver: "cg" | "jacobi" = "cg";
   last: StepReport;
 
   private readonly nuX: number;
@@ -101,6 +103,7 @@ export class MacSolver {
   private readonly pvec: Float64Array;
   private readonly ap: Float64Array;
   private readonly z: Float64Array;
+  private readonly diagA: Float64Array;
   private freeU: Uint8Array;
   private freeV: Uint8Array;
   private freeW: Uint8Array;
@@ -157,6 +160,7 @@ export class MacSolver {
     this.pvec = new Float64Array(this.nC);
     this.ap = new Float64Array(this.nC);
     this.z = new Float64Array(this.nC);
+    this.diagA = new Float64Array(this.nC);
     this.freeU = new Uint8Array(this.nU);
     this.freeV = new Uint8Array(this.nV);
     this.freeW = new Uint8Array(this.nW);
@@ -752,6 +756,7 @@ export class MacSolver {
     this.components = this.findComponents();
     this.unknown = [];
     for (const comp of this.components) for (const c of comp.cells) this.unknown.push(c);
+    this.fillDiagonal();
   }
 
   private findComponents(): Component[] {
@@ -1478,7 +1483,31 @@ export class MacSolver {
     let iterations = 0;
     let residual = Math.sqrt(rr);
     let converged = residual <= tol;
+    const jacobi = this.pressureSolver === "jacobi";
     while (!converged && iterations < maxIterations) {
+      if (jacobi) {
+        this.applyA(this.x, this.ap);
+        for (const c of this.unknown) {
+          const d = this.diagA[c]!;
+          this.pvec[c] = d > 0 ? this.x[c]! + (this.rhs[c]! - this.ap[c]!) / d : this.x[c]!;
+        }
+        for (const c of this.unknown) this.x[c] = this.pvec[c]!;
+        this.deflate(this.x);
+        this.applyA(this.x, this.ap);
+        let rr2 = 0;
+        for (const c of this.unknown) {
+          const rc = this.rhs[c]! - this.ap[c]!;
+          this.r[c] = rc;
+          rr2 += rc * rc;
+        }
+        this.deflate(this.r);
+        rr2 = 0;
+        for (const c of this.unknown) rr2 += this.r[c]! * this.r[c]!;
+        iterations += 1;
+        residual = Math.sqrt(rr2);
+        converged = residual <= tol;
+        continue;
+      }
       this.deflate(this.pvec);
       this.applyA(this.pvec, this.ap);
       let pap = 0;
@@ -1519,9 +1548,10 @@ export class MacSolver {
     for (let i = 0; i < this.nV; i++) if (this.freeV[i] === 1) this.v[i] = this.v[i]! - this.vT[i]!;
     for (let i = 0; i < this.nW; i++) if (this.freeW[i] === 1) this.w[i] = this.w[i]! - this.wT[i]!;
     this.syncPeriodic();
+    const name = this.pressureSolver === "jacobi" ? "Jacobi" : "CG";
     const detail = converged
-      ? `CG residual ${residual.toExponential(2)} in ${iterations}`
-      : `pressure CG did not converge: residual ${residual.toExponential(2)} after ${iterations}, tolerance ${tol.toExponential(2)}`;
+      ? `${name} residual ${residual.toExponential(2)} in ${iterations}`
+      : `pressure ${name} did not converge: residual ${residual.toExponential(2)} after ${iterations}, tolerance ${tol.toExponential(2)}`;
     return { converged, iterations, residual, detail };
   }
 
@@ -1589,6 +1619,39 @@ export class MacSolver {
       take(i, j, k - 1, invZ, "back");
       take(i, j, k + 1, invZ, "front");
       y[c] = diag * x[c]! - off;
+    }
+  }
+
+  private fillDiagonal(): void {
+    const { nx, ny, nz, boundaries: b } = this.spec;
+    const invX = 1 / (this.dx * this.dx);
+    const invY = 1 / (this.dy * this.dy);
+    const invZ = 1 / (this.dz * this.dz);
+    this.diagA.fill(0);
+    for (const c of this.unknown) {
+      const i = c % nx;
+      const j = Math.floor(c / nx) % ny;
+      const k = Math.floor(c / (nx * ny));
+      let diag = 0;
+      const take = (ni: number, nj: number, nk: number, inv: number, side: BoundaryName | null) => {
+        if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) {
+          if (side && b[side].kind === "outlet") diag += inv;
+          else if (side && b[side].kind === "periodic") {
+            const id = this.ic((ni + nx) % nx, (nj + ny) % ny, (nk + nz) % nz);
+            if (this.solid[id] !== 1) diag += inv;
+          }
+          return;
+        }
+        if (this.solid[this.ic(ni, nj, nk)] === 1) return;
+        diag += inv;
+      };
+      take(i - 1, j, k, invX, "west");
+      take(i + 1, j, k, invX, "east");
+      take(i, j - 1, k, invY, "south");
+      take(i, j + 1, k, invY, "north");
+      take(i, j, k - 1, invZ, "back");
+      take(i, j, k + 1, invZ, "front");
+      this.diagA[c] = diag;
     }
   }
 

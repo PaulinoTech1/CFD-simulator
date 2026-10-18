@@ -12,7 +12,7 @@ export type GuideStep = {
 export const GUIDE: readonly GuideStep[] = [
   {
     title: "Two calculations, one screen",
-    body: "The picture and the checked solver are not the same method. Treat the picture as a fast look at the case. Treat the headless MAC run as the number you can defend.",
+    body: "The checked envelope is constant-density Newtonian laminar flow on a Cartesian grid. The picture and the checked solver are not the same method. Treat the picture as a fast look at the case. Treat the headless MAC run as the number you can defend.",
     points: [
       "The canvas is a collocated CPU preview: semi-Lagrangian advection, a clipped backtrace, and a fixed number of pressure iterations.",
       "The checked scheme is a staggered MAC projection in double precision, in src/cfd/mac.ts. It does not draw this picture.",

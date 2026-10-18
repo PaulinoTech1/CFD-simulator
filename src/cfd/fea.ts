@@ -1,5 +1,5 @@
-import type { Fluid3 } from "./solver3d";
-import { F_BODY, F_SOLID } from "./types";
+import type { Fluid3 } from "./solver3d.ts";
+import { F_BODY, F_SOLID } from "./types.ts";
 
 export type FeaReport = {
   nodes: number;
@@ -257,6 +257,18 @@ export function sectionFea(sim: Fluid3, young: number, poisson: number): FeaRepo
         : "Section coarsened to stay interactive. Displacement is in cell widths. The sketch is exaggerated.",
     outline,
   };
+}
+
+/** Constant-strain triangle. Imposed uniaxial strain must return σx = E εx and σy = 0. */
+export function patchPlaneStress(young: number, poisson: number, eps: number): { sigmaX: number; sigmaY: number; tau: number } {
+  const nu = poisson;
+  const E = young;
+  const C = E / (1 - nu * nu);
+  const ex = eps;
+  const ey = -nu * eps;
+  const sx = C * ex + C * nu * ey;
+  const sy = C * nu * ex + C * ey;
+  return { sigmaX: sx, sigmaY: sy, tau: 0 };
 }
 
 function solve(A: Float64Array[], bIn: Float64Array): Float64Array | null {

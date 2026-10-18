@@ -509,7 +509,7 @@ export function Bench() {
     <div className="min-h-screen bg-bg text-fg">
       <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-border bg-bg px-4 py-3">
         <div className="min-w-40">
-          <p className="font-mono text-xs tracking-widest text-primary">CPU preview · GPU unverified</p>
+          <p className="font-mono text-xs tracking-widest text-primary">MAC reference headless · canvas is the preview · GPU unverified</p>
           <h1 className="text-balance text-xl font-semibold tracking-tight">Karman</h1>
         </div>
         <p className="hidden max-w-xl text-pretty text-sm text-muted md:block">
@@ -629,7 +629,7 @@ export function Bench() {
           {panel === "analysis" ? (
             <div id="panel-analysis" role="tabpanel" aria-labelledby="tab-analysis" className="flex flex-col gap-4 p-4">
               <p id="analysis-help" className="text-pretty text-sm text-muted">
-                Select a model. Available is the checked solver. Preview and Experimental run an estimate and are not verified. Planned stays disabled. A CAD kernel can be added later.
+                Envelope: constant-density Newtonian laminar flow on a Cartesian grid. The checked scheme is the staggered MAC projection, run headless. Passive scalar and Boussinesq heat are checked only on the cases named in verify/references.test.mjs. The canvas is still the collocated preview. Screens are not solvers. Electromagnetics and a CAD kernel are outside this program.
               </p>
               <p className="font-mono text-xs text-primary" aria-live="polite">Selected: {ANALYSIS_LABEL[analysis]}</p>
               <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-border bg-surface p-3">
@@ -842,7 +842,7 @@ export function Bench() {
               </div>
               <Slider label="Young’s modulus" min={0.2} max={20} step={0.1} value={young} digits={1} onChange={setYoung} />
               <div className="rounded-md border border-border bg-surface p-3">
-                <p className="text-xs text-muted">Experimental section · one-way plane stress · not FSI · ν = 0.30</p>
+                <p className="text-xs text-muted">Patch-tested plane stress, one way, not FSI. ν = 0.30. The patch covers the constitutive law, not this mesh.</p>
                 <p className="mt-1 font-mono text-sm text-primary tabular-nums">
                   σ {fea ? fea.maxVonMises.toExponential(2) : "—"} · |u| {fea ? fea.maxDisp.toExponential(2) : "—"}
                 </p>
