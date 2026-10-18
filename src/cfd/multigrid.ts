@@ -31,6 +31,10 @@ function applyA(g: PoissonGrid, x: Float64Array, y: Float64Array): void {
   }
 }
 
+export function applyPoisson(g: PoissonGrid, x: Float64Array, y: Float64Array): void {
+  applyA(g, x, y);
+}
+
 function residualOf(g: PoissonGrid, x: Float64Array, b: Float64Array, r: Float64Array): number {
   applyA(g, x, r);
   let s = 0;

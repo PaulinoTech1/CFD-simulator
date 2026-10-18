@@ -15,7 +15,7 @@ The native file `kernels/karman3d.cu` was not brought up to this scheme. The bro
 
 The handoff sequence for the 3090 Ti is in [docs/target-machine.md](target-machine.md). `scripts/build.sh` builds the host path first. `scripts/mac-run.mjs` is the headless Couette check.
 
-The Analysis panel lists experimental models in `src/cfd/experimental.ts`. They are validated for finite output by `verify/experimental.test.mjs`. They are not verified solvers.
+The Analysis panel lists screening models in `src/cfd/experimental.ts`. The lattice step conserves mass and momentum on a periodic D2Q9 lattice. The conjugate screen matches the conduction flux through the same wall. The multigrid V-cycle recovers a field from its own Laplacian on a Dirichlet grid. None of these replaces the checked MAC projection. Compressible, multiphase, and nonlinear structural solves are still not implemented; the screens only mark when the constant-density or linear assumption is outside a stated range.
 
 Geometric multigrid (`src/cfd/multigrid.ts`) and a D2Q9 lattice step (`src/cfd/lattice.ts`) were added from public design notes, not copied source. See [docs/upstream.md](upstream.md). Neither replaces the checked MAC projection.
 ## Earlier baseline

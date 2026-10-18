@@ -9,6 +9,7 @@ const W = [4 / 9, 1 / 9, 1 / 9, 1 / 9, 1 / 9, 1 / 36, 1 / 36, 1 / 36, 1 / 36];
 export type LatticeReport = {
   steps: number;
   maxSpeed: number;
+  meanUx: number;
   meanDensity: number;
 };
 
@@ -48,14 +49,16 @@ export function latticeStep(nx: number, ny: number, f: Float64Array, tau: number
   return next;
 }
 
-export function latticeRun(nx: number, ny: number, steps: number, tau: number): LatticeReport {
+/** Periodic D2Q9 from equilibrium at density 1 and velocity (ux0, 0). Mass and momentum should stay put. */
+export function latticeRun(nx: number, ny: number, steps: number, tau: number, ux0 = 0): LatticeReport {
   const f = new Float64Array(nx * ny * 9);
   for (let c = 0; c < nx * ny; c++) {
-    for (let q = 0; q < 9; q++) f[c * 9 + q] = W[q]!;
+    for (let q = 0; q < 9; q++) f[c * 9 + q] = eq(1, ux0, 0, q);
   }
   let cur = f;
   for (let s = 0; s < steps; s++) cur = latticeStep(nx, ny, cur, tau);
   let rhoSum = 0;
+  let uxSum = 0;
   let maxSpeed = 0;
   for (let c = 0; c < nx * ny; c++) {
     let rho = 0;
@@ -68,8 +71,12 @@ export function latticeRun(nx: number, ny: number, steps: number, tau: number): 
       uy += CY[q]! * fq;
     }
     rhoSum += rho;
-    const sp = rho > 0 ? Math.hypot(ux / rho, uy / rho) : 0;
+    const vx = rho > 0 ? ux / rho : 0;
+    const vy = rho > 0 ? uy / rho : 0;
+    uxSum += vx;
+    const sp = Math.hypot(vx, vy);
     if (sp > maxSpeed) maxSpeed = sp;
   }
-  return { steps, maxSpeed, meanDensity: rhoSum / (nx * ny) };
+  const cells = nx * ny;
+  return { steps, maxSpeed, meanUx: uxSum / cells, meanDensity: rhoSum / cells };
 }

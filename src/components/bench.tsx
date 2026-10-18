@@ -640,13 +640,13 @@ export function Bench() {
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">FLOW</p>
                 <AnalysisRow name="Incompressible" status="available" selected={analysis === "incompressible"} onSelect={() => { setAnalysis("incompressible"); setBuoyancy(0); setPanel("field"); }} note="Checked path. Constant-density Newtonian laminar flow on a structured grid." />
-                <AnalysisRow name="Incompressible (LBM)" status="experimental" selected={analysis === "lbm"} onSelect={() => setAnalysis("lbm")} note="Reports a lattice viscosity and a Mach estimate from the current inlet. Not a lattice Boltzmann solver." />
+                <AnalysisRow name="Incompressible (LBM)" status="experimental" selected={analysis === "lbm"} onSelect={() => setAnalysis("lbm")} note="Runs a periodic D2Q9 step and checks density and momentum. Not coupled to this volume." />
                 <AnalysisRow name="Multi-purpose" status="experimental" selected={analysis === "multipurpose"} onSelect={() => setAnalysis("multipurpose")} note="Exposes the same incompressible fields with heat and section controls available. Not a multiphysics coupling." />
-                <AnalysisRow name="Pedestrian wind comfort" status="experimental" selected={analysis === "comfort"} onSelect={() => setAnalysis("comfort")} note="A simple Lawson-style class from the current max speed. Not a comfort study." />
-                <AnalysisRow name="Compressible" status="experimental" selected={analysis === "compressible"} onSelect={() => setAnalysis("compressible")} note="Reports a Mach number from the inlet and a 340 m/s sound speed. Not a compressible solver." />
+                <AnalysisRow name="Pedestrian wind comfort" status="experimental" selected={analysis === "comfort"} onSelect={() => setAnalysis("comfort")} note="Classifies the preview max speed at 4, 6, and 8 m/s. No exceedance probability." />
+                <AnalysisRow name="Compressible" status="experimental" selected={analysis === "compressible"} onSelect={() => setAnalysis("compressible")} note="Isentropic density ratio and a Mach 0.3 screen on the constant-density assumption. Not a compressible solver." />
                 <AnalysisRow name="Convective heat transfer" status="preview" selected={analysis === "heat"} onSelect={() => { setAnalysis("heat"); setBuoyancy(1.2); setPanel("suite"); }} note="Turns on Boussinesq buoyancy and opens the Suite temperature controls. Not a verified heat-transfer study." />
-                <AnalysisRow name="Conjugate heat transfer" status="experimental" selected={analysis === "conjugate"} onSelect={() => setAnalysis("conjugate")} note="Estimates a solid-to-fluid temperature drop with a fixed conductivity ratio. Not conjugate heat transfer." />
-                <AnalysisRow name="Multiphase" status="experimental" selected={analysis === "multiphase"} onSelect={() => setAnalysis("multiphase")} note="Reports a volume fraction placeholder from the dye field. Not a multiphase solver." />
+                <AnalysisRow name="Conjugate heat transfer" status="experimental" selected={analysis === "conjugate"} onSelect={() => setAnalysis("conjugate")} note="One-dimensional series resistance. Fluid and solid fluxes match by construction. Not a field solve." />
+                <AnalysisRow name="Multiphase" status="experimental" selected={analysis === "multiphase"} onSelect={() => setAnalysis("multiphase")} note="No phase field is stored. Dye stays a passive scalar." />
               </div>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">STRUCTURAL</p>
@@ -656,7 +656,7 @@ export function Bench() {
                 <AnalysisRow name="Thermomechanical" status="experimental" selected={analysis === "thermomech"} onSelect={() => setAnalysis("thermomech")} note="Adds a thermal strain estimate to the section stress. Not thermomechanical coupling." />
                 <AnalysisRow name="Harmonic" status="experimental" selected={analysis === "harmonic"} onSelect={() => setAnalysis("harmonic")} note="Reports a forced-response estimate at 1 Hz. Not a harmonic solver." />
                 <AnalysisRow name="Frequency analysis" status="experimental" selected={analysis === "frequency"} onSelect={() => setAnalysis("frequency")} note="Estimates a first natural frequency from the section. Not a modal analysis." />
-                <AnalysisRow name="Nonlinear mechanical" status="experimental" selected={analysis === "nonlinear"} onSelect={() => setAnalysis("nonlinear")} note="Flags geometric nonlinearity if the section strain exceeds 1%. Not a nonlinear solver." />
+                <AnalysisRow name="Nonlinear mechanical" status="experimental" selected={analysis === "nonlinear"} onSelect={() => setAnalysis("nonlinear")} note="Compares section strain σ/E with 1%. Not a nonlinear solver." />
               </div>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">ELECTROMAGNETIC</p>
