@@ -6,6 +6,7 @@ import { sectionFea, type FeaReport } from "@/cfd/fea";
 import { PRESETS3, buildScene3, preset3Info, type BodyKind, type Preset3, type Splat3 } from "@/cfd/presets3d";
 import { drawCurve, drawVolume, hitVolume, type Camera } from "@/cfd/render3d";
 import { SKILLS, readVolume, solveBlackScholes, solveHeston, type SkillId } from "@/cfd/skills";
+import { runExperimental } from "@/cfd/experimental";
 import { Fluid3 } from "@/cfd/solver3d";
 import type { SimParams, SimStats, ViewMode } from "@/cfd/types";
 
@@ -481,6 +482,16 @@ export function Bench() {
   }
 
   const plan = planVolume(span * 2, span, span);
+  const exp = runExperimental(analysis, {
+    re,
+    uIn,
+    maxSpeed: hud.maxSpeed,
+    tIn,
+    tWall,
+    young,
+    vonMises: fea?.maxVonMises ?? 0,
+    meanPressure: fea?.meanPressure ?? 0,
+  });
   const priced = skillId === "blackscholes" || skillId === "heston";
   const fluidSkill = !priced && simRef.current ? readVolume(simRef.current, { re, preset: presetId }, skillId) : null;
 
@@ -582,8 +593,9 @@ export function Bench() {
               </p>
               <p className="font-mono text-xs text-primary">Current: {ANALYSIS_LABEL[analysis]}</p>
               <div className="rounded-md border border-border bg-surface p-3">
-                <p className="text-xs text-muted">Experimental reading</p>
-                <p className="mt-1 font-mono text-sm text-primary tabular-nums">{experimentalReading(analysis, hud, fea, { re, uIn, tIn, tWall, young })}</p>
+                <p className="text-xs text-muted">{exp.title}</p>
+                <p className="mt-1 font-mono text-sm text-primary tabular-nums">{exp.value}</p>
+                <p className="mt-1 text-pretty text-sm text-muted">{exp.detail}</p>
               </div>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">FLOW</p>
@@ -962,36 +974,6 @@ const zoomBtn = "inline-flex h-11 w-11 items-center justify-center rounded-md bo
 const chip = "inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface px-3 text-sm text-fg";
 const chipOn = "border-primary text-primary";
 
-
-function experimentalReading(
-  id: AnalysisId,
-  hud: Hud,
-  fea: FeaReport | null,
-  p: { re: number; uIn: number; tIn: number; tWall: number; young: number },
-): string {
-  const a = 340;
-  const mach = Math.abs(p.uIn) / a;
-  const nuLbm = (1 / 3) * (p.re > 0 ? 1 / p.re : 0);
-  const comfort = hud.maxSpeed < 2 ? "sitting" : hud.maxSpeed < 4 ? "standing" : hud.maxSpeed < 6 ? "walking" : "uncomfortable";
-  const sigma = fea ? fea.maxVonMises : 0;
-  const eps = fea && p.young > 0 ? sigma / (p.young * 1e9) : 0;
-  const fn = fea && fea.maxDisp > 0 ? Math.sqrt(p.young * 1e9 / 1) / (2 * Math.PI) : 0;
-  switch (id) {
-    case "lbm": return `lattice nu ≈ ${nuLbm.toExponential(2)} · Mach ${mach.toExponential(2)} · not an LBM solve`;
-    case "multipurpose": return `same incompressible fields · Re ${p.re.toFixed(0)} · heat and section available`;
-    case "comfort": return `max |u| ${hud.maxSpeed.toFixed(2)} m/s · class ${comfort} · not a comfort study`;
-    case "compressible": return `Mach ${mach.toExponential(2)} at ${p.uIn.toFixed(2)} m/s · a = 340 m/s · not a compressible solve`;
-    case "conjugate": return `ΔT solid-fluid ≈ ${(0.1 * (p.tWall - p.tIn)).toFixed(2)} K · k ratio 0.1 · not conjugate`;
-    case "multiphase": return `dye mean used as a volume-fraction stand-in · not a multiphase solve`;
-    case "dynamic": return fea ? `T ≈ ${(fn > 0 ? (1 / fn).toExponential(2) : "—")} s · not a dynamic solve` : "no section yet";
-    case "heatSolid": return `conduction drop ≈ ${(0.05 * (p.tWall - p.tIn)).toFixed(2)} K across the section · not a conduction solve`;
-    case "thermomech": return fea ? `thermal strain ≈ ${(1.2e-5 * (p.tWall - p.tIn)).toExponential(2)} · σ ${sigma.toExponential(2)} · not coupled` : "no section yet";
-    case "harmonic": return fea ? `1 Hz forced response · σ ${sigma.toExponential(2)} · not a harmonic solve` : "no section yet";
-    case "frequency": return fea ? `f1 ≈ ${fn.toExponential(2)} Hz · not a modal analysis` : "no section yet";
-    case "nonlinear": return fea ? (eps > 0.01 ? `strain ${eps.toExponential(2)} · geometric nonlinearity flagged · not a nonlinear solve` : `strain ${eps.toExponential(2)} · linear range · not a nonlinear solve`) : "no section yet";
-    default: return "checked incompressible path";
-  }
-}
 
 function AnalysisRow({ name, status, note, selected, onSelect }: { name: string; status: "available" | "preview" | "experimental" | "planned"; note: string; selected?: boolean; onSelect?: () => void }) {
   const tone =
