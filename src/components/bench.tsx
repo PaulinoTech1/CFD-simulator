@@ -16,7 +16,7 @@ const SPAN_NAME: Record<(typeof SPANS)[number], string> = {
   32: "Dense",
 };
 
-type Panel = "field" | "suite" | "skills" | "rig" | "kernels";
+type Panel = "analysis" | "field" | "suite" | "skills" | "rig" | "kernels";
 type Tool = "orbit" | "stir" | "place" | "erase";
 type Hud = SimStats & { stepMs: number; cells: string; hover: string };
 
@@ -531,6 +531,7 @@ export function Bench() {
           <div className="flex border-b border-border" role="tablist">
             {(
               [
+                ["analysis", "Analysis"],
                 ["field", "Field"],
                 ["suite", "Suite"],
                 ["skills", "Skills"],
@@ -550,6 +551,40 @@ export function Bench() {
               </button>
             ))}
           </div>
+
+
+          {panel === "analysis" ? (
+            <div className="flex flex-col gap-4 p-4">
+              <p className="text-pretty text-sm text-muted">
+                Choose the physical model. Only the incompressible path is checked. Other types are listed so the workbench shape is clear; they are not implemented.
+              </p>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-semibold tracking-wide text-muted">FLOW</p>
+                <AnalysisRow name="Incompressible" status="available" note="Constant-density Newtonian laminar flow on a structured grid. Passive scalar and Boussinesq buoyancy are optional." />
+                <AnalysisRow name="Incompressible (LBM)" status="planned" note="Lattice Boltzmann. Not in this cycle." />
+                <AnalysisRow name="Multi-purpose" status="planned" note="Requires a verified incompressible core first." />
+                <AnalysisRow name="Pedestrian wind comfort" status="planned" note="Needs outdoor geometry and a comfort metric. Not implemented." />
+                <AnalysisRow name="Compressible" status="planned" note="Shocks and density variation are future work." />
+                <AnalysisRow name="Convective heat transfer" status="preview" note="Temperature advection and diffusion exist in the Suite. Not a verified heat-transfer study." />
+                <AnalysisRow name="Conjugate heat transfer" status="planned" note="Requires a solid conduction solver. Not implemented." />
+                <AnalysisRow name="Multiphase" status="planned" note="Not in this cycle." />
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-semibold tracking-wide text-muted">STRUCTURAL</p>
+                <AnalysisRow name="Static" status="preview" note="One-way plane-stress section on the mid-span solid. Experimental, not FSI." />
+                <AnalysisRow name="Dynamic" status="planned" note="Not implemented." />
+                <AnalysisRow name="Heat transfer" status="planned" note="Solid conduction is not implemented." />
+                <AnalysisRow name="Thermomechanical" status="planned" note="Not implemented." />
+                <AnalysisRow name="Harmonic" status="planned" note="Not implemented." />
+                <AnalysisRow name="Frequency analysis" status="planned" note="Not implemented." />
+                <AnalysisRow name="Nonlinear mechanical" status="planned" note="Not implemented." />
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-semibold tracking-wide text-muted">ELECTROMAGNETIC</p>
+                <AnalysisRow name="Electromagnetics" status="planned" note="Not in this project." />
+              </div>
+            </div>
+          ) : null}
 
           {panel === "field" ? (
             <div className="flex flex-col gap-4 p-4">
@@ -695,6 +730,13 @@ export function Bench() {
                   if (simRef.current?.hasBody) simRef.current.reshape(solid, n);
                 }}
               />
+              <div className="rounded-md border border-border bg-surface p-3">
+                <p className="text-xs text-muted">Geometry</p>
+                <p className="mt-1 text-pretty text-sm text-muted">
+                  Solids are voxel stamps on the Cartesian grid. There is no CAD kernel, so edge repair, redundant faces, and small-entity removal from a B-rep do not apply. Use Clear solids to remove every stamp.
+                </p>
+              </div>
+
               <Slider label="Inlet temperature" min={0} max={120} step={1} value={tIn} digits={0} onChange={setTIn} />
               <Slider label="Solid temperature" min={0} max={120} step={1} value={tWall} digits={0} onChange={setTWall} />
               <Slider label="Ambient temperature" min={0} max={80} step={1} value={tAmb} digits={0} onChange={setTAmb} />
@@ -892,4 +934,22 @@ const btn = "inline-flex h-11 items-center justify-center gap-2 rounded-md borde
 const zoomBtn = "inline-flex h-11 w-11 items-center justify-center rounded-md border border-border bg-bg/80 text-lg text-fg hover:border-primary";
 const chip = "inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface px-3 text-sm text-fg";
 const chipOn = "border-primary text-primary";
+
+function AnalysisRow({ name, status, note }: { name: string; status: "available" | "preview" | "planned"; note: string }) {
+  const tone =
+    status === "available" ? "bg-primary/15 text-primary" :
+    status === "preview" ? "bg-primary/10 text-primary" :
+    "bg-muted/20 text-muted";
+  const label = status === "available" ? "Available" : status === "preview" ? "Preview" : "Planned";
+  return (
+    <div className="rounded-md border border-border bg-surface p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium text-sm">{name}</p>
+        <span className={`rounded-full px-2 py-0.5 text-xs ${tone}`}>{label}</span>
+      </div>
+      <p className="mt-1 text-pretty text-sm text-muted">{note}</p>
+    </div>
+  );
+}
+
 const field = "h-11 rounded-md border border-border bg-surface px-2 text-sm text-fg";
