@@ -5,45 +5,99 @@ export type GuidePanel = "analysis" | "field" | "suite" | "skills" | "rig" | "ke
 export type GuideStep = {
   title: string;
   body: string;
+  points: readonly string[];
   panel?: GuidePanel;
 };
 
 export const GUIDE: readonly GuideStep[] = [
   {
-    title: "What you are looking at",
-    body: "Karman is a fluid-flow bench. The picture on the left is a live CPU preview, not a GPU run and not an engineering-validated result. The checked solver is a separate headless calculation.",
+    title: "Two calculations, one screen",
+    body: "The picture and the checked solver are not the same method. Treat the picture as a fast look at the case. Treat the headless MAC run as the number you can defend.",
+    points: [
+      "The canvas is a collocated CPU preview: semi-Lagrangian advection, a clipped backtrace, and a fixed number of pressure iterations.",
+      "The checked scheme is a staggered MAC projection in double precision, in src/cfd/mac.ts. It does not draw this picture.",
+      "kernels/karman3d.cu is the native source. Its host path can be compiled with g++. Device execution on the 3090 Ti has not been run here.",
+    ],
   },
   {
-    title: "Move the picture",
-    body: "Drag the picture to orbit. Use + and −, or the scroll wheel, to zoom. Pause stops the clock, Step advances one frame, and Reset returns the case to its start.",
+    title: "What the picture is allowed to get wrong",
+    body: "The preview is kept so you can orbit a volume while the reference stays strict. Several shortcuts are still in it on purpose.",
+    points: [
+      "Viscosity in the preview is clipped. The MAC reference never replaces ν with a clipped product of dt and ν.",
+      "Divergence, gradient, and the Laplacian in the preview are not the same operator. The MAC projection uses a compatible pair.",
+      "Drag to orbit. + and − or the wheel zoom. Pause, Step, and Reset act on the preview clock only.",
+    ],
   },
   {
-    title: "Read the numbers",
-    body: "St, Cd, and Cl are labeled preview. They are estimates from the picture, not measured force coefficients. Reynolds number, CFL, and time sit on the picture itself.",
+    title: "The projection you can check",
+    body: "Incompressible, constant-density, Newtonian, laminar flow on a Cartesian grid. Stored pressure is kinematic: φ = p/ρ, so the correction is u := u − Δt ∇φ.",
+    points: [
+      "Advection is flux-form: first-order upwind, or limited linear reconstruction with Heun. A Courant-1 shift matches the translated scalar to 1e-8 on x, y, and z.",
+      "A failed substep rolls the fields, the clock, and the step counter back. A closed inlet, or an outlet clamp that breaks mass balance, refuses the step.",
+      "Taylor–Green decay is near first order, not second. That tolerance was not loosened to make the plot look better.",
+    ],
   },
   {
-    title: "Choose a model",
-    body: "Open Analysis. Available is the checked incompressible path. Preview and Experimental run a small estimate and say so. Planned stays disabled. Electromagnetics is not in this project.",
+    title: "Read the HUD as labeled",
+    body: "Re, CFL, and time on the picture are from the preview step. St, Cd, and Cl are labeled preview because the force and the shedding period are not a verified measurement.",
+    points: [
+      "A voxel body and a coarse grid will move those coefficients. Do not quote them as cylinder or airfoil data.",
+      "Kinetic energy and max |u| are diagnostics of the picture, not of the MAC residual.",
+      "The reference reports a residual, a divergence norm, and a volume-flux defect. Those are the quantities the tests assert.",
+    ],
+  },
+  {
+    title: "Analysis status is a claim about evidence",
+    body: "Available means the incompressible MAC path. Preview means a model that runs but has not been checked against a reference solution. Experimental means a small formula or a side solver. Planned means it does not run.",
+    points: [
+      "Convective heat transfer turns on a Boussinesq term in the preview. It is not a verified heat-transfer study.",
+      "The other flow and structural rows call runExperimental. They are finite-output checks, not Navier–Stokes, LBM, or solid mechanics.",
+      "Electromagnetics stays disabled. A separate CAD kernel is a later integration, not a hidden mode.",
+    ],
     panel: "analysis",
   },
   {
-    title: "Pick a case and a grid",
-    body: "Open Field. Kármán street, the NACA 0012 airfoil, and the thermal plume are the main cases. Grid size lists the cell count and whether it fits the browser, the reference cap, and the 3090 Ti memory estimate.",
+    title: "Cases, then the grid you can afford",
+    body: "Kármán street, NACA 0012, and the thermal plume are the cases worth looking at first. Lid cavity is the cleanest viscous check. The others are illustrations.",
+    points: [
+      "Grid size is 2N × N × N. Bench is 8,192 cells. Max preview is 524,288.",
+      "About 200,000 cells is the browser comfort line. The reference solver refuses more than 2,000,000 cells.",
+      "The L2, VRAM, and RAM lines are estimates for a 3090 Ti and a 5900X with 64 GB. They are not timings.",
+    ],
     panel: "field",
   },
   {
-    title: "Place a solid",
-    body: "Open Suite. Pick a shape, then orbit to look at it. Move, then click, to reposition. Temperature and the streamwise pressure gradient live here. The section stress is a one-way estimate, not fluid-structure interaction.",
+    title: "Solids, heat, and the section",
+    body: "Suite edits the preview. It does not redefine the MAC case file unless you export one.",
+    points: [
+      "Shapes are voxel stamps. Orbit stays available. Move, then click, repositions the stamp. Clear solids removes every stamp.",
+      "Inlet, wall, and ambient temperature plus a streamwise pressure gradient drive the preview. Buoyancy is −β (T − Tref) g when that path is on.",
+      "The mid-span section is plane stress, one way, ν = 0.30. It is not fluid–structure interaction. A singular or empty section is not a stress result.",
+    ],
     panel: "suite",
   },
   {
-    title: "What is actually checked",
-    body: "The browser picture uses a simpler method so you can see the flow. The staggered MAC solver is what the numerical tests check. Device execution on the 3090 Ti is still unverified until you compile and run it on that machine.",
+    title: "What is not on the hot path",
+    body: "Kernels lists four files. Only one is authoritative, and even that file’s GPU launch is unverified.",
+    points: [
+      "karman3d.cu is the MAC source. Build the host path first. nvcc -arch=sm_86 is the 3090 Ti line. Do not add --use_fast_math until the same checks have been compared.",
+      "The older 2D collocated file, the PTX divergence kernel, and the AVX2 energy reduction are retained. They are not called by the solver.",
+      "Geometric multigrid and the D2Q9 lattice step are separate modules with their own tests. They do not replace the pressure CG.",
+    ],
     panel: "kernels",
+  },
+  {
+    title: "How to leave the picture",
+    body: "If you need a number, leave the browser and run the reference. The picture will not tell you that it failed a conservation check.",
+    points: [
+      "node --experimental-strip-types --test verify/*.test.mjs runs the regression suite.",
+      "node --experimental-strip-types scripts/mac-run.mjs is the headless Couette check.",
+      "g++ -O2 -std=c++17 -DKARMAN_CPU -x c++ -o karman3d kernels/karman3d.cu && ./karman3d is the native host check. A GPU binary that merely links is not verification.",
+    ],
   },
 ];
 
-const DONE_KEY = "karman-guide-done";
+const DONE_KEY = "karman-guide-v2";
 
 export function guideWasFinished(): boolean {
   try {
@@ -96,7 +150,7 @@ export function Guide({
       role="dialog"
       aria-labelledby="guide-title"
       aria-describedby="guide-body"
-      className="absolute inset-x-3 bottom-3 z-20 max-w-xl rounded-lg border border-primary bg-bg/95 p-4 shadow-lg backdrop-blur-sm"
+      className="absolute inset-x-3 bottom-3 z-20 max-h-[70%] max-w-2xl overflow-y-auto rounded-lg border border-primary bg-bg/95 p-4 shadow-lg backdrop-blur-sm"
     >
       <p className="font-mono text-xs tracking-widest text-primary">
         Guide · {step + 1} of {GUIDE.length}
@@ -104,10 +158,15 @@ export function Guide({
       <h2 id="guide-title" ref={titleRef} tabIndex={-1} className="mt-1 text-base font-semibold tracking-tight outline-none">
         {current.title}
       </h2>
-      <p id="guide-body" className="mt-2 text-pretty text-sm text-muted">
+      <p id="guide-body" className="mt-2 text-pretty text-sm text-fg">
         {current.body}
       </p>
-      <p className="mt-3 font-mono text-xs text-muted">Arrow keys move. Escape skips.</p>
+      <ul className="mt-3 list-disc space-y-1 pl-5 text-pretty text-sm text-muted">
+        {current.points.map((point) => (
+          <li key={point}>{point}</li>
+        ))}
+      </ul>
+      <p className="mt-3 font-mono text-xs text-muted">Arrow keys move. Escape closes.</p>
       <div className="mt-4 flex flex-wrap gap-2">
         <button type="button" className={guideBtn} onClick={() => onStep(Math.max(0, step - 1))} disabled={step === 0}>
           Back
@@ -122,7 +181,7 @@ export function Guide({
           </button>
         )}
         <button type="button" className={guideBtn} onClick={() => onClose()}>
-          Skip
+          Close
         </button>
       </div>
     </div>
