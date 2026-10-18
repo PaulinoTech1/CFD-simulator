@@ -51,7 +51,8 @@ export function Bench() {
   const [view, setView] = useState<ViewMode>("dye");
   const [tool, setTool] = useState<Tool>("orbit");
   const [particles, setParticles] = useState(true);
-  const [panel, setPanel] = useState<Panel>("field");
+  const [panel, setPanel] = useState<Panel>("analysis");
+  const [analysis, setAnalysis] = useState<"incompressible" | "heat" | "static">("incompressible");
   const [kernelId, setKernelId] = useState(KERNELS[0]!.id);
   const [copied, setCopied] = useState(false);
   const [re, setRe] = useState(180);
@@ -470,7 +471,7 @@ export function Bench() {
           <h1 className="text-balance text-xl font-semibold tracking-tight">Karman</h1>
         </div>
         <p className="hidden max-w-xl text-pretty text-sm text-muted md:block">
-          Every case is a 3D volume. The picture is a CPU preview. The checked MAC solver runs headless. The CUDA file is not executing on a GPU here.
+          {analysis === "incompressible" ? "Incompressible" : analysis === "heat" ? "Convective heat transfer (preview)" : "Static section (preview)"} · CPU preview · checked MAC runs headless · GPU unverified
         </p>
         <div className="ml-auto flex flex-wrap gap-2">
           <button type="button" className={btn} onClick={() => setRunning((v) => !v)}>
@@ -556,22 +557,23 @@ export function Bench() {
           {panel === "analysis" ? (
             <div className="flex flex-col gap-4 p-4">
               <p className="text-pretty text-sm text-muted">
-                Choose the physical model. Only the incompressible path is checked. Other types are listed so the workbench shape is clear; they are not implemented.
+                Choose the physical model. Available and preview types can be selected. Planned types stay disabled. A separate CAD kernel can be integrated later; it is not part of this solver.
               </p>
+              <p className="font-mono text-xs text-primary">Current: {analysis === "incompressible" ? "Incompressible" : analysis === "heat" ? "Convective heat transfer (preview)" : "Static section (preview)"}</p>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">FLOW</p>
-                <AnalysisRow name="Incompressible" status="available" note="Constant-density Newtonian laminar flow on a structured grid. Passive scalar and Boussinesq buoyancy are optional." />
+                <AnalysisRow name="Incompressible" status="available" selected={analysis === "incompressible"} onSelect={() => { setAnalysis("incompressible"); setBuoyancy(0); setPanel("field"); }} note="Constant-density Newtonian laminar flow on a structured grid. Passive scalar is optional." />
                 <AnalysisRow name="Incompressible (LBM)" status="planned" note="Lattice Boltzmann. Not in this cycle." />
                 <AnalysisRow name="Multi-purpose" status="planned" note="Requires a verified incompressible core first." />
                 <AnalysisRow name="Pedestrian wind comfort" status="planned" note="Needs outdoor geometry and a comfort metric. Not implemented." />
                 <AnalysisRow name="Compressible" status="planned" note="Shocks and density variation are future work." />
-                <AnalysisRow name="Convective heat transfer" status="preview" note="Temperature advection and diffusion exist in the Suite. Not a verified heat-transfer study." />
+                <AnalysisRow name="Convective heat transfer" status="preview" selected={analysis === "heat"} onSelect={() => { setAnalysis("heat"); setBuoyancy(1.2); setPanel("suite"); }} note="Turns on Boussinesq buoyancy and opens the Suite temperature controls. Not a verified heat-transfer study." />
                 <AnalysisRow name="Conjugate heat transfer" status="planned" note="Requires a solid conduction solver. Not implemented." />
                 <AnalysisRow name="Multiphase" status="planned" note="Not in this cycle." />
               </div>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">STRUCTURAL</p>
-                <AnalysisRow name="Static" status="preview" note="One-way plane-stress section on the mid-span solid. Experimental, not FSI." />
+                <AnalysisRow name="Static" status="preview" selected={analysis === "static"} onSelect={() => { setAnalysis("static"); setPanel("suite"); }} note="Opens the one-way plane-stress section. Experimental, not FSI." />
                 <AnalysisRow name="Dynamic" status="planned" note="Not implemented." />
                 <AnalysisRow name="Heat transfer" status="planned" note="Solid conduction is not implemented." />
                 <AnalysisRow name="Thermomechanical" status="planned" note="Not implemented." />
@@ -935,20 +937,27 @@ const zoomBtn = "inline-flex h-11 w-11 items-center justify-center rounded-md bo
 const chip = "inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface px-3 text-sm text-fg";
 const chipOn = "border-primary text-primary";
 
-function AnalysisRow({ name, status, note }: { name: string; status: "available" | "preview" | "planned"; note: string }) {
+function AnalysisRow({ name, status, note, selected, onSelect }: { name: string; status: "available" | "preview" | "planned"; note: string; selected?: boolean; onSelect?: () => void }) {
   const tone =
     status === "available" ? "bg-primary/15 text-primary" :
     status === "preview" ? "bg-primary/10 text-primary" :
     "bg-muted/20 text-muted";
   const label = status === "available" ? "Available" : status === "preview" ? "Preview" : "Planned";
+  const canSelect = status !== "planned" && onSelect;
   return (
-    <div className="rounded-md border border-border bg-surface p-3">
+    <button
+      type="button"
+      disabled={!canSelect}
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={`rounded-md border p-3 text-left ${selected ? "border-primary" : "border-border"} ${canSelect ? "bg-surface hover:border-primary" : "bg-surface/60 cursor-not-allowed"}`}
+    >
       <div className="flex items-center justify-between gap-2">
         <p className="font-medium text-sm">{name}</p>
         <span className={`rounded-full px-2 py-0.5 text-xs ${tone}`}>{label}</span>
       </div>
       <p className="mt-1 text-pretty text-sm text-muted">{note}</p>
-    </div>
+    </button>
   );
 }
 
