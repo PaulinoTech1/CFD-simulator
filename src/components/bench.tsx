@@ -733,7 +733,7 @@ export function Bench() {
               <div className="rounded-md border border-border bg-surface p-3">
                 <p className="text-xs text-muted">Geometry</p>
                 <p className="mt-1 text-pretty text-sm text-muted">
-                  Solids are voxel stamps on the Cartesian grid. There is no CAD kernel, so edge repair, redundant faces, and small-entity removal from a B-rep do not apply. Use Clear solids to remove every stamp.
+                  Solids are voxel stamps on the Cartesian grid. A separate CAD kernel can be integrated later for edge repair, redundant faces, and small-entity removal. Use Clear solids to remove every stamp.
                 </p>
               </div>
 
