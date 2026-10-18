@@ -150,8 +150,9 @@ export function Guide({
       role="dialog"
       aria-labelledby="guide-title"
       aria-describedby="guide-body"
-      className="absolute inset-x-3 bottom-3 z-20 max-h-[70%] max-w-2xl overflow-y-auto rounded-lg border border-primary bg-bg/95 p-4 shadow-lg backdrop-blur-sm"
+      className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 flex max-h-[calc(100dvh-5.5rem)] max-w-2xl flex-col overflow-hidden rounded-lg border border-primary bg-bg/95 p-4 shadow-lg backdrop-blur-sm"
     >
+      <div className="min-h-0 flex-1 overflow-y-auto">
       <p className="font-mono text-xs tracking-widest text-primary">
         Guide · {step + 1} of {GUIDE.length}
       </p>
@@ -166,21 +167,22 @@ export function Guide({
           <li key={point}>{point}</li>
         ))}
       </ul>
-      <p className="mt-3 font-mono text-xs text-muted">Arrow keys move. Escape closes.</p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" className={guideBtn} onClick={() => onStep(Math.max(0, step - 1))} disabled={step === 0}>
+      </div>
+      <p className="mt-3 font-mono text-xs text-muted">Next advances. Close leaves the guide.</p>
+      <div className="mt-3 flex shrink-0 gap-2 border-t border-border pt-3">
+        <button type="button" className={`${guideBtn} flex-1`} onClick={() => onStep(Math.max(0, step - 1))} disabled={step === 0}>
           Back
         </button>
         {last ? (
-          <button type="button" className={guideBtnPrimary} onClick={() => onClose()}>
+          <button type="button" className={`${guideBtnPrimary} flex-1`} onClick={() => onClose()}>
             Finish
           </button>
         ) : (
-          <button type="button" className={guideBtnPrimary} onClick={() => onStep(step + 1)}>
+          <button type="button" className={`${guideBtnPrimary} flex-1`} onClick={() => onStep(step + 1)}>
             Next
           </button>
         )}
-        <button type="button" className={guideBtn} onClick={() => onClose()}>
+        <button type="button" className={`${guideBtn} flex-1`} onClick={() => onClose()}>
           Close
         </button>
       </div>
