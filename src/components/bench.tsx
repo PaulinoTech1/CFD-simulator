@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Download, Pause, Play, RotateCcw, SkipForward } from "lucide-react";
-import { CPU, GPU, formatBytes, planVolume } from "@/cfd/device";
+import { CPU, GPU, cellBudget, formatBytes, planVolume } from "@/cfd/device";
 import { KERNELS } from "@/cfd/kernels";
 import { sectionFea, type FeaReport } from "@/cfd/fea";
 import { PRESETS3, buildScene3, preset3Info, type BodyKind, type Preset3, type Splat3 } from "@/cfd/presets3d";
@@ -10,11 +10,13 @@ import { runExperimental } from "@/cfd/experimental";
 import { Fluid3 } from "@/cfd/solver3d";
 import type { SimParams, SimStats, ViewMode } from "@/cfd/types";
 
-const SPANS = [16, 24, 32] as const;
+const SPANS = [16, 24, 32, 48, 64] as const;
 const SPAN_NAME: Record<(typeof SPANS)[number], string> = {
   16: "Bench",
   24: "Fine",
   32: "Dense",
+  48: "Large",
+  64: "Max preview",
 };
 
 type Panel = "analysis" | "field" | "suite" | "skills" | "rig" | "kernels";
@@ -482,6 +484,7 @@ export function Bench() {
   }
 
   const plan = planVolume(span * 2, span, span);
+  const budget = cellBudget(span * 2, span, span);
   const exp = runExperimental(analysis, {
     re,
     uIn,
@@ -648,15 +651,29 @@ export function Bench() {
                 ))}
               </div>
               <label className="flex flex-col gap-1 text-xs text-muted">
-                Span
-                <select className={field} value={span} onChange={(e) => setSpan(Number(e.target.value) as (typeof SPANS)[number])}>
-                  {SPANS.map((h) => (
-                    <option key={h} value={h}>
-                      {SPAN_NAME[h]} · {h * 2}×{h}×{h}
-                    </option>
-                  ))}
+                Grid size
+                <select className={field} value={span} onChange={(e) => setSpan(Number(e.target.value) as (typeof SPANS)[number])} aria-describedby="cell-budget">
+                  {SPANS.map((h) => {
+                    const cells = h * 2 * h * h;
+                    return (
+                      <option key={h} value={h}>
+                        {SPAN_NAME[h]} · {h * 2}×{h}×{h} · {cells.toLocaleString("en-US")} cells
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
+              <div id="cell-budget" className="rounded-md border border-border bg-surface p-3" role="status">
+                <p className="text-xs text-muted">Hardware boundary · 3090 Ti 24 GB · 5900X 64 GB</p>
+                <p className="mt-1 font-mono text-sm text-primary tabular-nums">{budget.cells.toLocaleString("en-US")} cells · preview {formatBytes(budget.previewBytes)} · reference ~{formatBytes(budget.referenceBytes)}</p>
+                <ul className="mt-2 space-y-1 text-xs text-muted">
+                  <li>{budget.fitsL2 ? "Fits in 6 MB L2" : "Larger than 6 MB L2"}</li>
+                  <li>{budget.previewOk ? "Inside browser preview comfort (~200k cells)" : "Above browser preview comfort — expect slower steps"}</li>
+                  <li>{budget.withinReference ? "Within the 2,000,000-cell reference cap" : "Above the reference cap — the checked solver will refuse this grid"}</li>
+                  <li>{budget.fitsVram ? "Working-set estimate fits in 70% of 24 GB VRAM" : "Exceeds 70% of 24 GB VRAM"}</li>
+                </ul>
+                <p className="mt-2 text-pretty text-sm text-muted">{budget.note}</p>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 {(
                   [

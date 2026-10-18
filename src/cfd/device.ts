@@ -76,3 +76,40 @@ export function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
+
+/** Cell-count boundaries for the stated hardware. Estimates, not measurements. */
+export type CellBudget = {
+  cells: number;
+  previewBytes: number;
+  referenceBytes: number;
+  fitsL2: boolean;
+  fitsVram: boolean;
+  fitsRam: boolean;
+  withinReference: boolean;
+  previewOk: boolean;
+  note: string;
+};
+
+const PREVIEW_BYTES_PER_CELL = 10 * 4 + 1;
+const REFERENCE_BYTES_PER_CELL = 160;
+const PREVIEW_COMFORT_CELLS = 200_000;
+
+export function cellBudget(nx: number, ny: number, nz: number): CellBudget {
+  const cells = nx * ny * nz;
+  const previewBytes = cells * PREVIEW_BYTES_PER_CELL;
+  const referenceBytes = cells * REFERENCE_BYTES_PER_CELL;
+  const l2 = GPU.l2Mb * 1024 * 1024;
+  const vram = GPU.vramGb * 1024 * 1024 * 1024 * 0.7;
+  const ram = CPU.ramGb * 1024 * 1024 * 1024 * 0.5;
+  const fitsL2 = previewBytes < l2;
+  const fitsVram = referenceBytes < vram;
+  const fitsRam = referenceBytes < ram;
+  const withinReference = cells <= 2_000_000;
+  const previewOk = cells <= PREVIEW_COMFORT_CELLS;
+  let note = "Inside the browser preview comfort zone.";
+  if (!previewOk && withinReference) note = "Above the browser comfort zone. The preview will slow down. The reference solver still accepts this size.";
+  if (!withinReference && fitsVram) note = "Above the 2,000,000-cell reference cap. The checked MAC solver will refuse this grid.";
+  if (!fitsVram) note = "Working set estimate exceeds 70% of the 24 GB VRAM. Do not target this size on the 3090 Ti.";
+  if (!fitsRam) note = "Working set estimate exceeds half of the 64 GB system memory.";
+  return { cells, previewBytes, referenceBytes, fitsL2, fitsVram, fitsRam, withinReference, previewOk, note };
+}
