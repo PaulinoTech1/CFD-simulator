@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Copy, Download, Pause, Play, RotateCcw, SkipForward } from "lucide-react";
 import { CPU, GPU, cellBudget, formatBytes, planVolume } from "@/cfd/device";
 import { KERNELS } from "@/cfd/kernels";
@@ -9,8 +9,10 @@ import { SKILLS, readVolume, solveBlackScholes, solveHeston, type SkillId } from
 import { runExperimental } from "@/cfd/experimental";
 import { Fluid3 } from "@/cfd/solver3d";
 import type { SimParams, SimStats, ViewMode } from "@/cfd/types";
+import { paintChart } from "@/components/charts";
 import { GUIDE, Guide, guideWasFinished, markGuideFinished } from "@/components/guide";
 import { couetteCase, couetteError, couetteJson, runHeatRestCheck, runShearCheck } from "@/cfd/checks";
+import { samplePreview } from "@/cfd/profiles";
 import { MacSolver } from "@/cfd/mac";
 
 const SPANS = [16, 24, 32, 48, 64] as const;
@@ -126,6 +128,17 @@ export function Bench() {
   const spark = useRef(new Float32Array(160));
   const sparkN = useRef(0);
   const sparkAt = useRef(0);
+  const uChartRef = useRef<HTMLCanvasElement>(null);
+  const tChartRef = useRef<HTMLCanvasElement>(null);
+  const pChartRef = useRef<HTMLCanvasElement>(null);
+  const histChartRef = useRef<HTMLCanvasElement>(null);
+  const clChartRef = useRef<HTMLCanvasElement>(null);
+  const histKe = useRef(new Float32Array(160));
+  const histCl = useRef(new Float32Array(160));
+  const histN = useRef(0);
+  const histAt = useRef(0);
+  const histView = useRef(new Float32Array(160));
+  const histViewCl = useRef(new Float32Array(160));
   const resetRef = useRef<() => void>(() => {});
   const cam = useRef<Camera>({ yaw: 0.7, pitch: 0.38, dist: 48 });
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -207,6 +220,8 @@ export function Bench() {
     simRef.current?.load(scene);
     sparkN.current = 0;
     sparkAt.current = 0;
+    histN.current = 0;
+    histAt.current = 0;
   };
 
   useEffect(() => {
@@ -235,6 +250,8 @@ export function Bench() {
       kappa: live.current.kappa,
     });
     sim.load(scene);
+    histN.current = 0;
+    histAt.current = 0;
     if (live.current.yaw !== 0 || live.current.pitch !== 0) {
       sim.setOrientation(live.current.yaw, live.current.pitch, live.current.roll);
     }
@@ -301,6 +318,12 @@ export function Bench() {
       drawVolume(canvas, sim, live.current.view, cam.current, live.current.particles);
       const sparkCanvas = sparkRef.current;
       if (sparkCanvas) paintSpark(sparkCanvas, spark.current, sparkN.current, sparkAt.current);
+      if (guard > 0 && lastSt) {
+        histKe.current[histAt.current] = lastSt.ke;
+        histCl.current[histAt.current] = lastSt.cl;
+        histAt.current = (histAt.current + 1) % histKe.current.length;
+        if (histN.current < histKe.current.length) histN.current += 1;
+      }
       if (now - hudAt > 200 && lastSt) {
         hudAt = now;
         if (live.current.panel === "suite") {
@@ -334,6 +357,14 @@ export function Bench() {
           hover: toolName,
           re: live.current.re,
         });
+        const cut = samplePreview(sim);
+        if (uChartRef.current) paintChart(uChartRef.current, [{ name: "u", values: cut.speed, color: "#e39b2b" }]);
+        if (tChartRef.current) paintChart(tChartRef.current, [{ name: "T", values: cut.temperature, color: "#d4674f" }]);
+        if (pChartRef.current) paintChart(pChartRef.current, [{ name: "p", values: cut.pressure, color: "#7eb8a2" }]);
+        const nKe = unroll(histKe.current, histN.current, histAt.current, histView.current);
+        const nCl = unroll(histCl.current, histN.current, histAt.current, histViewCl.current);
+        if (histChartRef.current && nKe > 1) paintChart(histChartRef.current, [{ name: "KE", values: histView.current.subarray(0, nKe), color: "#e39b2b" }]);
+        if (clChartRef.current && nCl > 1) paintChart(clChartRef.current, [{ name: "Cl", values: histViewCl.current.subarray(0, nCl), color: "#7eb8a2" }]);
       }
       raf = requestAnimationFrame(frame);
     };
@@ -663,6 +694,13 @@ export function Bench() {
             <Stat label="max |u|" value={num(hud.maxSpeed, 2)} />
             <Stat label="KE" value={hud.ke > 0 ? hud.ke.toExponential(2) : "—"} />
           </dl>
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <ChartFrame title="Speed vs height" note="Preview · mid-length, mid-span. A gap is a solid." canvasRef={uChartRef} />
+            <ChartFrame title="Temperature vs height" note="Preview · same line. Not a checked heat profile." canvasRef={tChartRef} />
+            <ChartFrame title="Pressure along the duct" note="Preview · mid-height. Not a measured drop." canvasRef={pChartRef} />
+            <ChartFrame title="Kinetic energy" note="Preview history since reset." canvasRef={histChartRef} />
+            <ChartFrame title="Lift coefficient" note="Preview history. Not an engineering Cl." canvasRef={clChartRef} />
+          </div>
           {guideOpen ? (
             <Guide
               step={guideStep}
@@ -1093,6 +1131,25 @@ export function Bench() {
 function wrap180(deg: number): number {
   const turns = (((deg + 180) % 360) + 360) % 360;
   return turns - 180;
+}
+
+function unroll(src: Float32Array, n: number, at: number, out: Float32Array): number {
+  const count = Math.min(n, src.length, out.length);
+  const start = n < src.length ? 0 : at;
+  for (let i = 0; i < count; i++) out[i] = src[(start + i) % src.length]!;
+  return count;
+}
+
+function ChartFrame({ title, note, canvasRef }: { title: string; note: string; canvasRef: RefObject<HTMLCanvasElement | null> }) {
+  return (
+    <figure className="rounded-md border border-border bg-surface p-2">
+      <figcaption className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium text-fg">{title}</span>
+        <span className="text-right text-xs text-muted">{note}</span>
+      </figcaption>
+      <canvas ref={canvasRef} className="mt-1 h-28 w-full" />
+    </figure>
+  );
 }
 
 function paintSpark(canvas: HTMLCanvasElement, data: Float32Array, n: number, cursor: number): void {
