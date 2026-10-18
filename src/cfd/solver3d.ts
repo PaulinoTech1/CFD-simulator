@@ -1,5 +1,5 @@
-import type { BodyKind, Scene3, Splat3 } from "./presets3d";
-import { F_BODY, F_FLUID, F_INLET, F_LID, F_OUTLET, F_SOLID, type SimParams, type SimStats } from "./types";
+import type { BodyKind, Scene3, Splat3 } from "./presets3d.ts";
+import { F_BODY, F_FLUID, F_INLET, F_LID, F_OUTLET, F_SOLID, type SimParams, type SimStats } from "./types.ts";
 
 function blocked(flag: number): boolean {
   return flag === F_SOLID || flag === F_BODY;
@@ -44,6 +44,9 @@ export class Fluid3 {
   cz = 0;
   radius = 1;
   aoa = 0;
+  /** Degrees. Yaw is about the vertical axis. Pitch tilts the shape. */
+  yaw = 0;
+  pitch = 0;
   charLength = 1;
   divResidual = 0;
   dissipation = 0;
@@ -292,6 +295,12 @@ export class Fluid3 {
     return n;
   }
 
+  setOrientation(yaw: number, pitch: number): void {
+    this.yaw = yaw;
+    this.pitch = pitch;
+    if (this.hasBody && this.bodyKind !== "none") this.reshape(this.bodyKind, this.radius);
+  }
+
   reshape(kind: BodyKind, size: number, at?: { x: number; y: number; z: number }): void {
     const x = at?.x ?? this.cx;
     const y = at?.y ?? this.cy;
@@ -304,22 +313,34 @@ export class Fluid3 {
     if (kind === "none") return;
     const { nx, ny, nz, flags, u, v, w, temp } = this;
     const r = Math.max(1.2, size);
-    const i0 = Math.max(1, Math.floor(x - r * 2));
-    const i1 = Math.min(nx - 2, Math.ceil(x + r * 2));
-    const j0 = Math.max(1, Math.floor(y - r * 2));
-    const j1 = Math.min(ny - 2, Math.ceil(y + r * 2));
-    const k0 = Math.max(1, Math.floor(z - r * 2));
-    const k1 = Math.min(nz - 2, Math.ceil(z + r * 2));
+    const reach = r * 3;
+    const i0 = Math.max(1, Math.floor(x - reach));
+    const i1 = Math.min(nx - 2, Math.ceil(x + reach));
+    const j0 = Math.max(1, Math.floor(y - reach));
+    const j1 = Math.min(ny - 2, Math.ceil(y + reach));
+    const k0 = Math.max(1, Math.floor(z - reach));
+    const k1 = Math.min(nz - 2, Math.ceil(z + reach));
     const aoa = (this.aoa * Math.PI) / 180;
+    const yaw = (this.yaw * Math.PI) / 180;
+    const pitch = (this.pitch * Math.PI) / 180;
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    const cp = Math.cos(pitch);
+    const sp = Math.sin(pitch);
     for (let k = k0; k <= k1; k++) {
       for (let j = j0; j <= j1; j++) {
         for (let i = i0; i <= i1; i++) {
           const id = i + nx * (j + ny * k);
           const f = flags[id]!;
           if (f === F_SOLID || f === F_INLET || f === F_OUTLET || f === F_LID) continue;
-          const dx = i - x;
-          const dy = j - y;
-          const dz = k - z;
+          const dx0 = i - x;
+          const dy0 = j - y;
+          const dz0 = k - z;
+          const x1 = cy * dx0 + sy * dz0;
+          const z1 = -sy * dx0 + cy * dz0;
+          const dx = cp * x1 + sp * dy0;
+          const dy = -sp * x1 + cp * dy0;
+          const dz = z1;
           let inside = false;
           if (kind === "sphere") inside = dx * dx + dy * dy + dz * dz <= r * r;
           else if (kind === "cylinder") inside = dx * dx + dy * dy <= r * r && Math.abs(dz) <= r * 1.6;

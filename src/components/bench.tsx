@@ -89,6 +89,8 @@ export function Bench() {
   const [iterations, setIterations] = useState(8);
   const [solid, setSolid] = useState<BodyKind>("sphere");
   const [solidSize, setSolidSize] = useState(2.4);
+  const [yaw, setYaw] = useState(0);
+  const [pitch, setPitch] = useState(0);
   const [gradP, setGradP] = useState(0);
   const [tIn, setTIn] = useState(20);
   const [tWall, setTWall] = useState(20);
@@ -148,6 +150,8 @@ export function Bench() {
     panel,
     solid,
     solidSize,
+    yaw,
+    pitch,
     skillId,
     presetId,
   });
@@ -170,6 +174,8 @@ export function Bench() {
     panel,
     solid,
     solidSize,
+    yaw,
+    pitch,
     skillId,
     presetId,
   };
@@ -226,6 +232,9 @@ export function Bench() {
       kappa: live.current.kappa,
     });
     sim.load(scene);
+    if (live.current.yaw !== 0 || live.current.pitch !== 0) {
+      sim.setOrientation(live.current.yaw, live.current.pitch);
+    }
     let lastSt: SimStats | null = null;
     const warmStart = performance.now();
     let warmed = 0;
@@ -295,7 +304,12 @@ export function Bench() {
           setDrop(sim.pressureDrop());
           setFea(sectionFea(sim, live.current.young, 0.3));
           const cells = sim.bodyCells();
-          setShapeNote(cells > 0 ? `${sim.bodyKind}: ${cells} solid cells` : "No solid cells. The shape button did not stamp, or Clear solids removed them.");
+          const round = sim.bodyKind === "sphere" ? " · sphere ignores yaw and pitch" : "";
+          setShapeNote(
+            cells > 0
+              ? `${sim.bodyKind}: ${cells} solid cells · yaw ${sim.yaw.toFixed(0)}° · pitch ${sim.pitch.toFixed(0)}°${round}`
+              : "No solid cells. The shape button did not stamp, or Clear solids removed them.",
+          );
         }
         if (live.current.skillId !== "blackscholes" && live.current.skillId !== "heston") {
           setReading(readVolume(sim, { re: live.current.re, preset: live.current.presetId }, live.current.skillId).note);
@@ -889,6 +903,33 @@ export function Bench() {
                   if (simRef.current?.hasBody) simRef.current.reshape(solid, n);
                 }}
               />
+              <Slider
+                label="Yaw"
+                min={-180}
+                max={180}
+                step={5}
+                value={yaw}
+                digits={0}
+                onChange={(n) => {
+                  setYaw(n);
+                  simRef.current?.setOrientation(n, pitch);
+                }}
+              />
+              <Slider
+                label="Pitch"
+                min={-90}
+                max={90}
+                step={5}
+                value={pitch}
+                digits={0}
+                onChange={(n) => {
+                  setPitch(n);
+                  simRef.current?.setOrientation(yaw, n);
+                }}
+              />
+              <p className="text-pretty text-sm text-muted">
+                Yaw turns the solid about the vertical axis. Pitch tilts it. Cone, cylinder, plate, box, and airfoil restamp. A sphere does not change.
+              </p>
               <div className="rounded-md border border-border bg-surface p-3">
                 <p className="text-xs text-muted">Geometry</p>
                 <p className="mt-1 text-pretty text-sm text-muted">

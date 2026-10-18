@@ -1,4 +1,4 @@
-import { F_BODY, F_FLUID, F_INLET, F_LID, F_OUTLET, F_SOLID, type ViewMode } from "./types";
+import { F_BODY, F_FLUID, F_INLET, F_LID, F_OUTLET, F_SOLID, type ViewMode } from "./types.ts";
 
 export type Preset3 = "karman" | "airfoil" | "cavity" | "plume" | "jet" | "kelvin" | "ink";
 
