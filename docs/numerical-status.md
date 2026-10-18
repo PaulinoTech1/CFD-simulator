@@ -14,6 +14,8 @@ The native file `kernels/karman3d.cu` was not brought up to this scheme. The bro
 
 
 The handoff sequence for the 3090 Ti is in [docs/target-machine.md](target-machine.md). `scripts/build.sh` builds the host path first. `scripts/mac-run.mjs` is the headless Couette check.
+
+The Analysis panel lists experimental models in `src/cfd/experimental.ts`. They are validated for finite output by `verify/experimental.test.mjs`. They are not verified solvers.
 ## Earlier baseline
 
 Baseline commit before the MAC reference: `aac72f47fddcd381d941dddcd600796b8bf00633`.

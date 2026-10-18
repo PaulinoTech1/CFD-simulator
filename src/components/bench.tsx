@@ -576,8 +576,11 @@ export function Bench() {
                 key={id}
                 type="button"
                 role="tab"
+                id={`tab-${id}`}
+                aria-controls={`panel-${id}`}
                 aria-selected={panel === id}
-                className={`h-11 min-w-0 flex-1 px-1 text-xs ${panel === id ? "bg-surface text-primary" : "text-muted"}`}
+                tabIndex={panel === id ? 0 : -1}
+                className={`h-11 min-w-0 flex-1 px-1 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${panel === id ? "bg-surface text-primary" : "text-muted"}`}
                 onClick={() => setPanel(id)}
               >
                 {label}
@@ -587,12 +590,12 @@ export function Bench() {
 
 
           {panel === "analysis" ? (
-            <div className="flex flex-col gap-4 p-4">
-              <p className="text-pretty text-sm text-muted">
-                Choose a model. The incompressible path is the only checked solver. The other twelve are experimental estimates that reuse the current fields or a simple formula. They are not verified CFD or structural solvers. A separate CAD kernel can be integrated later.
+            <div id="panel-analysis" role="tabpanel" aria-labelledby="tab-analysis" className="flex flex-col gap-4 p-4">
+              <p id="analysis-help" className="text-pretty text-sm text-muted">
+                Select a model. Available is the checked solver. Preview and Experimental run an estimate and are not verified. Planned stays disabled. A CAD kernel can be added later.
               </p>
-              <p className="font-mono text-xs text-primary">Current: {ANALYSIS_LABEL[analysis]}</p>
-              <div className="rounded-md border border-border bg-surface p-3">
+              <p className="font-mono text-xs text-primary" aria-live="polite">Selected: {ANALYSIS_LABEL[analysis]}</p>
+              <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-border bg-surface p-3">
                 <p className="text-xs text-muted">{exp.title}</p>
                 <p className="mt-1 font-mono text-sm text-primary tabular-nums">{exp.value}</p>
                 <p className="mt-1 text-pretty text-sm text-muted">{exp.detail}</p>
@@ -988,8 +991,9 @@ function AnalysisRow({ name, status, note, selected, onSelect }: { name: string;
       type="button"
       disabled={!canSelect}
       aria-pressed={selected}
+      aria-label={`${name}, ${label}${selected ? ", selected" : ""}`}
       onClick={onSelect}
-      className={`rounded-md border p-3 text-left ${selected ? "border-primary" : "border-border"} ${canSelect ? "bg-surface hover:border-primary" : "bg-surface/60 cursor-not-allowed"}`}
+      className={`rounded-md border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${selected ? "border-primary" : "border-border"} ${canSelect ? "bg-surface hover:border-primary" : "bg-surface/60 cursor-not-allowed"}`}
     >
       <div className="flex items-center justify-between gap-2">
         <p className="font-medium text-sm">{name}</p>
