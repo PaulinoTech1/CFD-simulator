@@ -9,6 +9,7 @@ import { SKILLS, readVolume, solveBlackScholes, solveHeston, type SkillId } from
 import { runExperimental } from "@/cfd/experimental";
 import { Fluid3 } from "@/cfd/solver3d";
 import type { SimParams, SimStats, ViewMode } from "@/cfd/types";
+import { GUIDE, Guide, guideWasFinished, markGuideFinished } from "@/components/guide";
 
 const SPANS = [16, 24, 32, 48, 64] as const;
 const SPAN_NAME: Record<(typeof SPANS)[number], string> = {
@@ -100,6 +101,8 @@ export function Bench() {
   const [hud, setHud] = useState<Hud>(ZERO);
   const [reading, setReading] = useState("");
   const [dist, setDist] = useState(43);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideStep, setGuideStep] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sparkRef = useRef<HTMLCanvasElement>(null);
@@ -189,6 +192,10 @@ export function Bench() {
     sparkN.current = 0;
     sparkAt.current = 0;
   };
+
+  useEffect(() => {
+    if (!guideWasFinished()) setGuideOpen(true);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -509,6 +516,19 @@ export function Bench() {
           {ANALYSIS_LABEL[analysis]} · CPU preview · checked MAC runs headless · GPU unverified
         </p>
         <div className="ml-auto flex flex-wrap gap-2">
+          <button
+            type="button"
+            className={btn}
+            aria-expanded={guideOpen}
+            aria-controls="guide-title"
+            onClick={() => {
+              setGuideStep(0);
+              setGuideOpen(true);
+              setPanel("analysis");
+            }}
+          >
+            Guide
+          </button>
           <button type="button" className={btn} onClick={() => setRunning((v) => !v)}>
             {running ? <Pause className="size-4" /> : <Play className="size-4" />}
             {running ? "Pause" : "Run"}
@@ -561,6 +581,20 @@ export function Bench() {
             <Stat label="max |u|" value={num(hud.maxSpeed, 2)} />
             <Stat label="KE" value={hud.ke > 0 ? hud.ke.toExponential(2) : "—"} />
           </dl>
+          {guideOpen ? (
+            <Guide
+              step={guideStep}
+              onStep={(next) => {
+                setGuideStep(next);
+                const panelId = GUIDE[next]?.panel;
+                if (panelId) setPanel(panelId);
+              }}
+              onClose={() => {
+                setGuideOpen(false);
+                markGuideFinished();
+              }}
+            />
+          ) : null}
         </section>
 
         <aside className="min-w-0 border-border lg:col-span-1 lg:max-h-screen lg:overflow-y-auto lg:border-l">
