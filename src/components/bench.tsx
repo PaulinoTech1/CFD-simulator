@@ -17,6 +17,27 @@ const SPAN_NAME: Record<(typeof SPANS)[number], string> = {
 };
 
 type Panel = "analysis" | "field" | "suite" | "skills" | "rig" | "kernels";
+type AnalysisId =
+  | "incompressible" | "heat" | "static"
+  | "lbm" | "multipurpose" | "comfort" | "compressible" | "conjugate" | "multiphase"
+  | "dynamic" | "heatSolid" | "thermomech" | "harmonic" | "frequency" | "nonlinear";
+const ANALYSIS_LABEL: Record<AnalysisId, string> = {
+  incompressible: "Incompressible",
+  heat: "Convective heat transfer (preview)",
+  static: "Static section (preview)",
+  lbm: "Incompressible LBM (experimental)",
+  multipurpose: "Multi-purpose (experimental)",
+  comfort: "Pedestrian wind comfort (experimental)",
+  compressible: "Compressible (experimental)",
+  conjugate: "Conjugate heat transfer (experimental)",
+  multiphase: "Multiphase (experimental)",
+  dynamic: "Dynamic (experimental)",
+  heatSolid: "Solid heat transfer (experimental)",
+  thermomech: "Thermomechanical (experimental)",
+  harmonic: "Harmonic (experimental)",
+  frequency: "Frequency analysis (experimental)",
+  nonlinear: "Nonlinear mechanical (experimental)",
+};
 type Tool = "orbit" | "stir" | "place" | "erase";
 type Hud = SimStats & { stepMs: number; cells: string; hover: string };
 
@@ -52,7 +73,7 @@ export function Bench() {
   const [tool, setTool] = useState<Tool>("orbit");
   const [particles, setParticles] = useState(true);
   const [panel, setPanel] = useState<Panel>("analysis");
-  const [analysis, setAnalysis] = useState<"incompressible" | "heat" | "static">("incompressible");
+  const [analysis, setAnalysis] = useState<AnalysisId>("incompressible");
   const [kernelId, setKernelId] = useState(KERNELS[0]!.id);
   const [copied, setCopied] = useState(false);
   const [re, setRe] = useState(180);
@@ -471,7 +492,7 @@ export function Bench() {
           <h1 className="text-balance text-xl font-semibold tracking-tight">Karman</h1>
         </div>
         <p className="hidden max-w-xl text-pretty text-sm text-muted md:block">
-          {analysis === "incompressible" ? "Incompressible" : analysis === "heat" ? "Convective heat transfer (preview)" : "Static section (preview)"} · CPU preview · checked MAC runs headless · GPU unverified
+          {ANALYSIS_LABEL[analysis]} · CPU preview · checked MAC runs headless · GPU unverified
         </p>
         <div className="ml-auto flex flex-wrap gap-2">
           <button type="button" className={btn} onClick={() => setRunning((v) => !v)}>
@@ -557,29 +578,33 @@ export function Bench() {
           {panel === "analysis" ? (
             <div className="flex flex-col gap-4 p-4">
               <p className="text-pretty text-sm text-muted">
-                Choose the physical model. Available and preview types can be selected. Planned types stay disabled. A separate CAD kernel can be integrated later; it is not part of this solver.
+                Choose a model. The incompressible path is the only checked solver. The other twelve are experimental estimates that reuse the current fields or a simple formula. They are not verified CFD or structural solvers. A separate CAD kernel can be integrated later.
               </p>
-              <p className="font-mono text-xs text-primary">Current: {analysis === "incompressible" ? "Incompressible" : analysis === "heat" ? "Convective heat transfer (preview)" : "Static section (preview)"}</p>
+              <p className="font-mono text-xs text-primary">Current: {ANALYSIS_LABEL[analysis]}</p>
+              <div className="rounded-md border border-border bg-surface p-3">
+                <p className="text-xs text-muted">Experimental reading</p>
+                <p className="mt-1 font-mono text-sm text-primary tabular-nums">{experimentalReading(analysis, hud, fea, { re, uIn, tIn, tWall, young })}</p>
+              </div>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">FLOW</p>
-                <AnalysisRow name="Incompressible" status="available" selected={analysis === "incompressible"} onSelect={() => { setAnalysis("incompressible"); setBuoyancy(0); setPanel("field"); }} note="Constant-density Newtonian laminar flow on a structured grid. Passive scalar is optional." />
-                <AnalysisRow name="Incompressible (LBM)" status="planned" note="Lattice Boltzmann. Not in this cycle." />
-                <AnalysisRow name="Multi-purpose" status="planned" note="Requires a verified incompressible core first." />
-                <AnalysisRow name="Pedestrian wind comfort" status="planned" note="Needs outdoor geometry and a comfort metric. Not implemented." />
-                <AnalysisRow name="Compressible" status="planned" note="Shocks and density variation are future work." />
+                <AnalysisRow name="Incompressible" status="available" selected={analysis === "incompressible"} onSelect={() => { setAnalysis("incompressible"); setBuoyancy(0); setPanel("field"); }} note="Checked path. Constant-density Newtonian laminar flow on a structured grid." />
+                <AnalysisRow name="Incompressible (LBM)" status="experimental" selected={analysis === "lbm"} onSelect={() => setAnalysis("lbm")} note="Reports a lattice viscosity and a Mach estimate from the current inlet. Not a lattice Boltzmann solver." />
+                <AnalysisRow name="Multi-purpose" status="experimental" selected={analysis === "multipurpose"} onSelect={() => setAnalysis("multipurpose")} note="Exposes the same incompressible fields with heat and section controls available. Not a multiphysics coupling." />
+                <AnalysisRow name="Pedestrian wind comfort" status="experimental" selected={analysis === "comfort"} onSelect={() => setAnalysis("comfort")} note="A simple Lawson-style class from the current max speed. Not a comfort study." />
+                <AnalysisRow name="Compressible" status="experimental" selected={analysis === "compressible"} onSelect={() => setAnalysis("compressible")} note="Reports a Mach number from the inlet and a 340 m/s sound speed. Not a compressible solver." />
                 <AnalysisRow name="Convective heat transfer" status="preview" selected={analysis === "heat"} onSelect={() => { setAnalysis("heat"); setBuoyancy(1.2); setPanel("suite"); }} note="Turns on Boussinesq buoyancy and opens the Suite temperature controls. Not a verified heat-transfer study." />
-                <AnalysisRow name="Conjugate heat transfer" status="planned" note="Requires a solid conduction solver. Not implemented." />
-                <AnalysisRow name="Multiphase" status="planned" note="Not in this cycle." />
+                <AnalysisRow name="Conjugate heat transfer" status="experimental" selected={analysis === "conjugate"} onSelect={() => setAnalysis("conjugate")} note="Estimates a solid-to-fluid temperature drop with a fixed conductivity ratio. Not conjugate heat transfer." />
+                <AnalysisRow name="Multiphase" status="experimental" selected={analysis === "multiphase"} onSelect={() => setAnalysis("multiphase")} note="Reports a volume fraction placeholder from the dye field. Not a multiphase solver." />
               </div>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">STRUCTURAL</p>
-                <AnalysisRow name="Static" status="preview" selected={analysis === "static"} onSelect={() => { setAnalysis("static"); setPanel("suite"); }} note="Opens the one-way plane-stress section. Experimental, not FSI." />
-                <AnalysisRow name="Dynamic" status="planned" note="Not implemented." />
-                <AnalysisRow name="Heat transfer" status="planned" note="Solid conduction is not implemented." />
-                <AnalysisRow name="Thermomechanical" status="planned" note="Not implemented." />
-                <AnalysisRow name="Harmonic" status="planned" note="Not implemented." />
-                <AnalysisRow name="Frequency analysis" status="planned" note="Not implemented." />
-                <AnalysisRow name="Nonlinear mechanical" status="planned" note="Not implemented." />
+                <AnalysisRow name="Static" status="preview" selected={analysis === "static"} onSelect={() => { setAnalysis("static"); setPanel("suite"); }} note="One-way plane-stress section. Experimental, not FSI." />
+                <AnalysisRow name="Dynamic" status="experimental" selected={analysis === "dynamic"} onSelect={() => setAnalysis("dynamic")} note="Estimates a displacement period from the section stiffness and a unit mass. Not a dynamic solver." />
+                <AnalysisRow name="Heat transfer" status="experimental" selected={analysis === "heatSolid"} onSelect={() => setAnalysis("heatSolid")} note="Estimates solid conduction across the section thickness. Not a conduction solver." />
+                <AnalysisRow name="Thermomechanical" status="experimental" selected={analysis === "thermomech"} onSelect={() => setAnalysis("thermomech")} note="Adds a thermal strain estimate to the section stress. Not thermomechanical coupling." />
+                <AnalysisRow name="Harmonic" status="experimental" selected={analysis === "harmonic"} onSelect={() => setAnalysis("harmonic")} note="Reports a forced-response estimate at 1 Hz. Not a harmonic solver." />
+                <AnalysisRow name="Frequency analysis" status="experimental" selected={analysis === "frequency"} onSelect={() => setAnalysis("frequency")} note="Estimates a first natural frequency from the section. Not a modal analysis." />
+                <AnalysisRow name="Nonlinear mechanical" status="experimental" selected={analysis === "nonlinear"} onSelect={() => setAnalysis("nonlinear")} note="Flags geometric nonlinearity if the section strain exceeds 1%. Not a nonlinear solver." />
               </div>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">ELECTROMAGNETIC</p>
@@ -937,12 +962,44 @@ const zoomBtn = "inline-flex h-11 w-11 items-center justify-center rounded-md bo
 const chip = "inline-flex h-11 items-center justify-center rounded-md border border-border bg-surface px-3 text-sm text-fg";
 const chipOn = "border-primary text-primary";
 
-function AnalysisRow({ name, status, note, selected, onSelect }: { name: string; status: "available" | "preview" | "planned"; note: string; selected?: boolean; onSelect?: () => void }) {
+
+function experimentalReading(
+  id: AnalysisId,
+  hud: Hud,
+  fea: FeaReport | null,
+  p: { re: number; uIn: number; tIn: number; tWall: number; young: number },
+): string {
+  const a = 340;
+  const mach = Math.abs(p.uIn) / a;
+  const nuLbm = (1 / 3) * (p.re > 0 ? 1 / p.re : 0);
+  const comfort = hud.maxSpeed < 2 ? "sitting" : hud.maxSpeed < 4 ? "standing" : hud.maxSpeed < 6 ? "walking" : "uncomfortable";
+  const sigma = fea ? fea.maxVonMises : 0;
+  const eps = fea && p.young > 0 ? sigma / (p.young * 1e9) : 0;
+  const fn = fea && fea.maxDisp > 0 ? Math.sqrt(p.young * 1e9 / 1) / (2 * Math.PI) : 0;
+  switch (id) {
+    case "lbm": return `lattice nu ≈ ${nuLbm.toExponential(2)} · Mach ${mach.toExponential(2)} · not an LBM solve`;
+    case "multipurpose": return `same incompressible fields · Re ${p.re.toFixed(0)} · heat and section available`;
+    case "comfort": return `max |u| ${hud.maxSpeed.toFixed(2)} m/s · class ${comfort} · not a comfort study`;
+    case "compressible": return `Mach ${mach.toExponential(2)} at ${p.uIn.toFixed(2)} m/s · a = 340 m/s · not a compressible solve`;
+    case "conjugate": return `ΔT solid-fluid ≈ ${(0.1 * (p.tWall - p.tIn)).toFixed(2)} K · k ratio 0.1 · not conjugate`;
+    case "multiphase": return `dye mean used as a volume-fraction stand-in · not a multiphase solve`;
+    case "dynamic": return fea ? `T ≈ ${(fn > 0 ? (1 / fn).toExponential(2) : "—")} s · not a dynamic solve` : "no section yet";
+    case "heatSolid": return `conduction drop ≈ ${(0.05 * (p.tWall - p.tIn)).toFixed(2)} K across the section · not a conduction solve`;
+    case "thermomech": return fea ? `thermal strain ≈ ${(1.2e-5 * (p.tWall - p.tIn)).toExponential(2)} · σ ${sigma.toExponential(2)} · not coupled` : "no section yet";
+    case "harmonic": return fea ? `1 Hz forced response · σ ${sigma.toExponential(2)} · not a harmonic solve` : "no section yet";
+    case "frequency": return fea ? `f1 ≈ ${fn.toExponential(2)} Hz · not a modal analysis` : "no section yet";
+    case "nonlinear": return fea ? (eps > 0.01 ? `strain ${eps.toExponential(2)} · geometric nonlinearity flagged · not a nonlinear solve` : `strain ${eps.toExponential(2)} · linear range · not a nonlinear solve`) : "no section yet";
+    default: return "checked incompressible path";
+  }
+}
+
+function AnalysisRow({ name, status, note, selected, onSelect }: { name: string; status: "available" | "preview" | "experimental" | "planned"; note: string; selected?: boolean; onSelect?: () => void }) {
   const tone =
     status === "available" ? "bg-primary/15 text-primary" :
     status === "preview" ? "bg-primary/10 text-primary" :
+    status === "experimental" ? "bg-primary/10 text-primary" :
     "bg-muted/20 text-muted";
-  const label = status === "available" ? "Available" : status === "preview" ? "Preview" : "Planned";
+  const label = status === "available" ? "Available" : status === "preview" ? "Preview" : status === "experimental" ? "Experimental" : "Planned";
   const canSelect = status !== "planned" && onSelect;
   return (
     <button
